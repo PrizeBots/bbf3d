@@ -1,48 +1,47 @@
 /**
- * Bubby - Baby hatched creature that idles around and attacks plants (sprouts, bushes, trees)
+ * AdultBubby - Mature bubby with blob head on capsule body
  */
-class Bubby extends SpawnableObject {
-    constructor(scene, position, team, shadowGenerator, getAllPlants, getAllBubbies, onMatureCallback, initialHealth = 100) {
+class AdultBubby extends SpawnableObject {
+    constructor(scene, position, team, shadowGenerator, getAllPlants, getAllBubbies, initialHealth = 100) {
         super(scene, position, shadowGenerator, 100); // 100 max health
 
         this.team = team; // 'red' or 'blue'
         this.getAllPlants = getAllPlants; // Function to get all plants in the scene
         this.getAllBubbies = getAllBubbies; // Function to get all other bubbies
-        this.onMatureCallback = onMatureCallback; // Callback when baby matures to adult
         this.idleTime = 0;
-        this.moveSpeed = 0.06; // Slower movement for baby
+        this.moveSpeed = 0.1; // Faster movement for adult
         this.squishPhase = 0;
+        this.bobPhase = 0;
 
         // AI behavior
         this.state = 'idle'; // 'idle', 'wandering', 'moving_to_target', 'attacking'
         this.target = null;
-        this.sensingRange = 15; // How far bubby can detect plants
-        this.attackRange = 2; // How close to start attacking
+        this.sensingRange = 20; // Longer sensing range for adult
+        this.attackRange = 2.5; // Slightly longer attack range
         this.attackCooldown = 0;
-        this.attackInterval = 1.0; // Attack every 1.0 seconds
-        this.attackDamage = 1; // 1 HP per attack = 1 HP per second
+        this.attackInterval = 0.8; // Attack faster than baby (every 0.8 seconds)
+        this.attackDamage = 2; // More damage per attack
 
         // Wandering behavior
         this.wanderTarget = null;
         this.wanderTime = 0;
-        this.wanderDuration = 3.0; // Wander for 3 seconds before choosing new direction
-
-        // Maturation (baby -> adult)
-        this.growthRate = 1.0; // Grow 1 max HP per HP eaten
-        this.matureThreshold = 150; // Mature when max HP reaches 150
-        this.hasMatured = false;
+        this.wanderDuration = 4.0; // Wander for longer periods
 
         // Growth
-        this.baseSize = 1.0; // Start smaller as baby
+        this.baseSize = 1.0;
         this.currentSize = 1.0;
         this.growthAmount = 0;
-        this.maxGrowth = 1.5; // Baby can only grow so much
+        this.maxGrowth = 1.8; // Can grow larger as adult
+
+        // Body parts
+        this.body = null;
+        this.head = null;
 
         this.create();
         this.enableShadows();
-        this.createHealthBar(1.5); // Offset for bubby height
+        this.createHealthBar(); // Uses head as parent with offset
 
-        // Set initial health (transferred from egg)
+        // Set initial health
         if (initialHealth) {
             this.setHealth(initialHealth);
         }
@@ -51,33 +50,74 @@ class Bubby extends SpawnableObject {
     }
 
     /**
-     * Create the bubby mesh (round slime squish)
+     * Create the adult bubby mesh (blob head on capsule body)
      */
     create() {
-        this.mesh = BABYLON.MeshBuilder.CreateSphere(
-            `bubby_${this.team}_${Date.now()}`,
+        // Create container
+        this.mesh = new BABYLON.TransformNode(`adult_bubby_${this.team}_${Date.now()}`, this.scene);
+        this.mesh.position = this.position.clone();
+        this.mesh.position.y = 0; // Ground level
+
+        // Create capsule body (height includes rounded caps)
+        this.body = BABYLON.MeshBuilder.CreateCapsule(
+            `adult_bubby_body_${this.team}_${Date.now()}`,
             {
-                diameter: 1.5,
+                radius: 0.4,
+                height: 1.2,
+                tessellation: 16
+            },
+            this.scene
+        );
+        this.body.position.y = 0.6; // Half of height (1.2/2 = 0.6) to sit on ground
+        this.body.parent = this.mesh;
+
+        // Create blob head (sphere)
+        this.head = BABYLON.MeshBuilder.CreateSphere(
+            `adult_bubby_head_${this.team}_${Date.now()}`,
+            {
+                diameter: 0.8,
                 segments: 16
             },
             this.scene
         );
+        this.head.position.y = 1.4; // On top of body (0.6 + 0.6 + 0.4/2 - 0.4/2 = 1.2 + 0.2)
+        this.head.parent = this.mesh;
 
-        this.mesh.position = this.position.clone();
-
-        // Create bubby material based on team
-        const bubbyMaterial = new BABYLON.StandardMaterial(`bubbyMat_${this.team}_${Date.now()}`, this.scene);
+        // Create material based on team
+        const material = new BABYLON.StandardMaterial(`adultBubbyMat_${this.team}_${Date.now()}`, this.scene);
 
         if (this.team === 'red') {
-            bubbyMaterial.diffuseColor = new BABYLON.Color3(0.9, 0.2, 0.2); // Red
-            bubbyMaterial.emissiveColor = new BABYLON.Color3(0.3, 0.05, 0.05);
+            material.diffuseColor = new BABYLON.Color3(1.0, 0.3, 0.3); // Bright red
+            material.emissiveColor = new BABYLON.Color3(0.4, 0.1, 0.1);
         } else {
-            bubbyMaterial.diffuseColor = new BABYLON.Color3(0.2, 0.4, 0.9); // Blue
-            bubbyMaterial.emissiveColor = new BABYLON.Color3(0.05, 0.1, 0.3);
+            material.diffuseColor = new BABYLON.Color3(0.3, 0.5, 1.0); // Bright blue
+            material.emissiveColor = new BABYLON.Color3(0.1, 0.2, 0.4);
         }
 
-        bubbyMaterial.alpha = 0.9; // Slightly translucent like slime
-        this.mesh.material = bubbyMaterial;
+        material.alpha = 0.9; // Slightly translucent like slime
+        this.body.material = material;
+        this.head.material = material;
+    }
+
+    /**
+     * Override createHealthBar to use head mesh as parent
+     */
+    createHealthBar(offsetY = 0.8) {
+        if (!this.head) {
+            console.warn("Cannot create healthbar without head mesh");
+            return;
+        }
+        this.healthBar = new HealthBar(this.scene, this.head, this.maxHealth, offsetY);
+    }
+
+    /**
+     * Override enableShadows for multiple meshes
+     */
+    enableShadows() {
+        if (this.shadowGenerator) {
+            if (this.body) this.shadowGenerator.addShadowCaster(this.body);
+            if (this.head) this.shadowGenerator.addShadowCaster(this.head);
+        }
     }
 
     /**
@@ -90,7 +130,7 @@ class Bubby extends SpawnableObject {
     }
 
     /**
-     * Update bubby state (AI behavior and animations)
+     * Update adult bubby state (AI behavior and animations)
      */
     update() {
         if (!this.mesh || !this.isActive) {
@@ -127,20 +167,37 @@ class Bubby extends SpawnableObject {
         // Constrain to arena bounds
         this.constrainToArena();
 
-        // Apply squish animation based on current size
-        this.squishPhase += 0.05;
-        const squishY = 1 + Math.sin(this.squishPhase) * 0.1;
-        const squishXZ = 1 / Math.sqrt(squishY);
+        // Apply animations based on current size
+        this.squishPhase += 0.04;
+        this.bobPhase += 0.03;
 
-        if (this.mesh) {
-            this.mesh.scaling = new BABYLON.Vector3(
+        // Body squish animation
+        const squishY = 1 + Math.sin(this.squishPhase) * 0.08;
+        const squishXZ = 1 / Math.sqrt(squishY);
+        if (this.body) {
+            this.body.scaling = new BABYLON.Vector3(
                 squishXZ * this.currentSize,
                 squishY * this.currentSize,
                 squishXZ * this.currentSize
             );
+        }
 
-            // Gentle rocking motion
-            this.mesh.rotation.z = Math.sin(this.squishPhase * 0.7) * 0.1;
+        // Head bob and squish
+        if (this.head) {
+            const headSquish = 1 + Math.sin(this.squishPhase * 1.3) * 0.1;
+            this.head.scaling = new BABYLON.Vector3(
+                this.currentSize / headSquish,
+                this.currentSize * headSquish,
+                this.currentSize / headSquish
+            );
+
+            // Bob up and down slightly
+            this.head.position.y = 1.4 + Math.sin(this.bobPhase) * 0.05;
+        }
+
+        // Gentle rocking motion
+        if (this.mesh) {
+            this.mesh.rotation.z = Math.sin(this.squishPhase * 0.5) * 0.08;
         }
     }
 
@@ -148,21 +205,23 @@ class Bubby extends SpawnableObject {
      * Update idle state - sense for nearby plants or start wandering
      */
     updateIdle() {
-        // Sense for nearby plants
-        const nearestPlant = this.findNearestPlant();
+        // Only hunt if not at full HP (adult bubbies only eat to heal)
+        if (this.getHealth() < this.maxHealth) {
+            const nearestPlant = this.findNearestPlant();
 
-        if (nearestPlant) {
-            this.target = nearestPlant;
-            this.state = 'moving_to_target';
-        } else {
-            // Start wandering after a moment
-            this.idleTime += 0.016;
-            if (this.idleTime > 0.5) { // Idle for 0.5 seconds before wandering
-                this.state = 'wandering';
-                this.idleTime = 0;
-                this.wanderTime = 0;
-                this.pickWanderTarget();
+            if (nearestPlant) {
+                this.target = nearestPlant;
+                this.state = 'moving_to_target';
+                return;
             }
+        }
+
+        // Otherwise just wander
+        if (this.idleTime > 0.3) {
+            this.state = 'wandering';
+            this.idleTime = 0;
+            this.wanderTime = 0;
+            this.pickWanderTarget();
         }
     }
 
@@ -170,9 +229,8 @@ class Bubby extends SpawnableObject {
      * Pick a random wander target within the arena
      */
     pickWanderTarget() {
-        // Random point within arena bounds
         const angle = Math.random() * Math.PI * 2;
-        const distance = 10 + Math.random() * 20;
+        const distance = 15 + Math.random() * 25;
 
         this.wanderTarget = new BABYLON.Vector3(
             this.mesh.position.x + Math.cos(angle) * distance,
@@ -180,11 +238,10 @@ class Bubby extends SpawnableObject {
             this.mesh.position.z + Math.sin(angle) * distance
         );
 
-        // Clamp to arena bounds (160 wide x 40 deep)
-        const maxX = 78;
-        const maxZ = 18;
-        this.wanderTarget.x = Math.max(-maxX, Math.min(maxX, this.wanderTarget.x));
-        this.wanderTarget.z = Math.max(-maxZ, Math.min(maxZ, this.wanderTarget.z));
+        // Clamp to arena bounds
+        const maxDist = 60;
+        this.wanderTarget.x = Math.max(-maxDist, Math.min(maxDist, this.wanderTarget.x));
+        this.wanderTarget.z = Math.max(-maxDist, Math.min(maxDist, this.wanderTarget.z));
     }
 
     /**
@@ -193,16 +250,18 @@ class Bubby extends SpawnableObject {
     updateWandering(deltaTime) {
         this.wanderTime += deltaTime;
 
-        // Check if we sense a plant while wandering
-        const nearestPlant = this.findNearestPlant();
-        if (nearestPlant) {
-            this.target = nearestPlant;
-            this.state = 'moving_to_target';
-            this.wanderTarget = null;
-            return;
+        // Check if we sense a plant while wandering (only if not at full HP)
+        if (this.getHealth() < this.maxHealth) {
+            const nearestPlant = this.findNearestPlant();
+            if (nearestPlant) {
+                this.target = nearestPlant;
+                this.state = 'moving_to_target';
+                this.wanderTarget = null;
+                return;
+            }
         }
 
-        // Pick new wander target after duration or if reached current target
+        // Pick new wander target after duration
         if (this.wanderTime >= this.wanderDuration || !this.wanderTarget) {
             this.pickWanderTarget();
             this.wanderTime = 0;
@@ -213,7 +272,6 @@ class Bubby extends SpawnableObject {
             const direction = this.wanderTarget.subtract(this.mesh.position);
             const distance = direction.length();
 
-            // Check if reached wander target
             if (distance < 2) {
                 this.state = 'idle';
                 this.wanderTarget = null;
@@ -222,10 +280,8 @@ class Bubby extends SpawnableObject {
 
             direction.normalize();
 
-            // Check for collisions with other bubbies
             const avoidanceVector = this.calculateAvoidance();
             if (avoidanceVector) {
-                // Blend movement direction with avoidance
                 direction.x = direction.x * 0.6 + avoidanceVector.x * 0.4;
                 direction.z = direction.z * 0.6 + avoidanceVector.z * 0.4;
                 direction.normalize();
@@ -250,26 +306,21 @@ class Bubby extends SpawnableObject {
         const direction = targetPos.subtract(this.mesh.position);
         const distance = direction.length();
 
-        // Check if in attack range
         if (distance <= this.attackRange) {
             this.state = 'attacking';
             return;
         }
 
-        // Check if target is out of sensing range
         if (distance > this.sensingRange) {
             this.target = null;
             this.state = 'idle';
             return;
         }
 
-        // Move toward target with collision avoidance
         direction.normalize();
 
-        // Check for collisions with other bubbies
         const avoidanceVector = this.calculateAvoidance();
         if (avoidanceVector) {
-            // Blend movement direction with avoidance
             direction.x = direction.x * 0.5 + avoidanceVector.x * 0.5;
             direction.z = direction.z * 0.5 + avoidanceVector.z * 0.5;
             direction.normalize();
@@ -288,7 +339,7 @@ class Bubby extends SpawnableObject {
         }
 
         const bubbies = this.getAllBubbies();
-        const avoidanceRadius = 2.5; // Personal space
+        const avoidanceRadius = 3.0;
         let avoidanceVector = new BABYLON.Vector3(0, 0, 0);
         let hasCollision = false;
 
@@ -301,7 +352,6 @@ class Bubby extends SpawnableObject {
             const distance = toOther.length();
 
             if (distance < avoidanceRadius && distance > 0) {
-                // Too close - add repulsion force
                 const repulsion = toOther.normalize().scale(-1);
                 const strength = 1 - (distance / avoidanceRadius);
                 avoidanceVector.addInPlace(repulsion.scale(strength));
@@ -325,13 +375,11 @@ class Bubby extends SpawnableObject {
         const targetPos = this.target.mesh.position;
         const distance = BABYLON.Vector3.Distance(this.mesh.position, targetPos);
 
-        // If target moved out of attack range, chase it
         if (distance > this.attackRange) {
             this.state = 'moving_to_target';
             return;
         }
 
-        // Attack at intervals
         if (this.attackCooldown <= 0) {
             this.attackTarget();
             this.attackCooldown = this.attackInterval;
@@ -346,33 +394,9 @@ class Bubby extends SpawnableObject {
             return;
         }
 
-        // Deal damage to target
         this.target.takeDamage(this.attackDamage);
-
-        // Grow max HP when eating (both current and max HP grow together)
-        const hpGrowth = this.attackDamage * this.growthRate;
-        const newMaxHealth = this.maxHealth + hpGrowth;
-        const newHealth = this.getHealth() + hpGrowth;
-
-        // Check for maturation BEFORE updating
-        if (!this.hasMatured && newMaxHealth >= this.matureThreshold) {
-            // Cap at threshold and mature
-            this.healthBar.setMaxHealth(this.matureThreshold);
-            this.maxHealth = this.matureThreshold;
-            this.setHealth(this.matureThreshold);
-            this.mature();
-            return; // Stop processing after maturation
-        } else {
-            // Continue growing
-            this.healthBar.setMaxHealth(newMaxHealth);
-            this.maxHealth = newMaxHealth;
-            this.setHealth(newHealth);
-        }
-
-        // Grow size when dealing damage
         this.grow();
 
-        // Check if target is dead
         if (!this.target.isActive) {
             this.target = null;
             this.state = 'idle';
@@ -380,7 +404,7 @@ class Bubby extends SpawnableObject {
     }
 
     /**
-     * Find the nearest plant (sprout, bush, or tree) within sensing range
+     * Find the nearest plant within sensing range
      */
     findNearestPlant() {
         if (!this.getAllPlants) {
@@ -411,21 +435,6 @@ class Bubby extends SpawnableObject {
     }
 
     /**
-     * Mature from baby bubby to adult bubby
-     */
-    mature() {
-        this.hasMatured = true;
-
-        if (this.onMatureCallback) {
-            // Spawn adult bubby at current position with current health
-            this.onMatureCallback(this.mesh.position.clone(), this.team, this.getHealth());
-        }
-
-        // Dispose baby bubby
-        this.dispose();
-    }
-
-    /**
      * Constrain position to arena bounds
      */
     constrainToArena() {
@@ -433,42 +442,35 @@ class Bubby extends SpawnableObject {
             return;
         }
 
-        // Arena bounds (grass field is 160 wide x 40 deep)
-        const maxX = 78; // Slightly inside to keep fully on grass
-        const maxZ = 18;
+        // Arena bounds (grass field is roughly -60 to 60 in X and Z)
+        const maxX = 60;
+        const maxZ = 60;
 
         if (this.mesh.position.x < -maxX) {
             this.mesh.position.x = -maxX;
             this.wanderTarget = null; // Reset wander target if hit boundary
-            this.state = 'idle';
         } else if (this.mesh.position.x > maxX) {
             this.mesh.position.x = maxX;
             this.wanderTarget = null;
-            this.state = 'idle';
         }
 
         if (this.mesh.position.z < -maxZ) {
             this.mesh.position.z = -maxZ;
             this.wanderTarget = null;
-            this.state = 'idle';
         } else if (this.mesh.position.z > maxZ) {
             this.mesh.position.z = maxZ;
             this.wanderTarget = null;
-            this.state = 'idle';
         }
     }
 
     /**
-     * Grow the bubby when it eats
+     * Grow the adult bubby when it eats
      */
     grow() {
-        const growthIncrement = 0.01875; // Calibrated for 2 sprouts worth of food
+        const growthIncrement = 0.015;
         this.growthAmount += growthIncrement;
 
-        // Cap growth at max
         this.growthAmount = Math.min(this.growthAmount, this.maxGrowth - this.baseSize);
-
-        // Update current size
         this.currentSize = this.baseSize + this.growthAmount;
     }
 
@@ -480,12 +482,20 @@ class Bubby extends SpawnableObject {
     }
 
     /**
-     * Dispose bubby and clean up
+     * Dispose adult bubby and clean up
      */
     dispose() {
         if (this.updateObserver) {
             this.scene.onBeforeRenderObservable.remove(this.updateObserver);
             this.updateObserver = null;
+        }
+        if (this.body) {
+            this.body.dispose();
+            this.body = null;
+        }
+        if (this.head) {
+            this.head.dispose();
+            this.head = null;
         }
         super.dispose();
     }

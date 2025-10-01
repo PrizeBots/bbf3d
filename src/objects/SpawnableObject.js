@@ -33,12 +33,12 @@ class SpawnableObject {
     /**
      * Create and attach healthbar
      */
-    createHealthBar() {
+    createHealthBar(offsetY = 2.5) {
         if (!this.mesh) {
             console.warn("Cannot create healthbar without mesh");
             return;
         }
-        this.healthBar = new HealthBar(this.scene, this.mesh, this.maxHealth);
+        this.healthBar = new HealthBar(this.scene, this.mesh, this.maxHealth, offsetY);
     }
 
     /**

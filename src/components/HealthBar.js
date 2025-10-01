@@ -2,7 +2,7 @@
  * HealthBar - Visual health indicator for game objects
  */
 class HealthBar {
-    constructor(scene, parentMesh, maxHealth = 100) {
+    constructor(scene, parentMesh, maxHealth = 100, offsetY = 2.5) {
         this.scene = scene;
         this.parentMesh = parentMesh;
         this.maxHealth = maxHealth;
@@ -10,7 +10,7 @@ class HealthBar {
         this.container = null;
         this.background = null;
         this.healthBar = null;
-        this.offset = new BABYLON.Vector3(0, 2.5, 0); // Above parent
+        this.offsetY = offsetY; // Height above parent
 
         this.create();
     }
@@ -55,6 +55,7 @@ class HealthBar {
         healthMaterial.emissiveColor = new BABYLON.Color3(0.1, 0.5, 0.1);
         this.healthBar.material = healthMaterial;
 
+        // Initial position update
         this.updatePosition();
     }
 
@@ -126,13 +127,19 @@ class HealthBar {
         healthMaterial.diffuseColor = new BABYLON.Color3(0.2, 1, 0.2);
         healthMaterial.emissiveColor = new BABYLON.Color3(0.1, 0.5, 0.1);
         this.healthBar.material = healthMaterial;
+
+        // Update position after resizing
+        this.updatePosition();
     }
 
     /**
      * Update the parent mesh the health bar follows
      */
-    setParentMesh(newParentMesh) {
+    setParentMesh(newParentMesh, offsetY = null) {
         this.parentMesh = newParentMesh;
+        if (offsetY !== null) {
+            this.offsetY = offsetY;
+        }
         this.updatePosition();
     }
 
@@ -172,7 +179,10 @@ class HealthBar {
      */
     updatePosition() {
         if (this.parentMesh && this.container) {
-            this.container.position = this.parentMesh.position.add(this.offset);
+            const offset = new BABYLON.Vector3(0, this.offsetY, 0);
+            // Use absolutePosition for meshes with parents (like bush foliage)
+            const parentPosition = this.parentMesh.absolutePosition || this.parentMesh.position;
+            this.container.position = parentPosition.add(offset);
         }
     }
 

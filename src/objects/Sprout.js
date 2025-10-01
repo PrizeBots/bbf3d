@@ -3,7 +3,8 @@
  */
 class Sprout extends SpawnableObject {
     constructor(scene, position, shadowGenerator, onMatureCallback, existingHealthBar = null) {
-        super(scene, position, shadowGenerator, 50);
+        // Start with initial max HP of 10, will grow to 50
+        super(scene, position, shadowGenerator, 10);
 
         this.growthTime = 0;
         this.swayPhase = 0;
@@ -17,10 +18,11 @@ class Sprout extends SpawnableObject {
         // Use existing health bar or create new one
         if (existingHealthBar) {
             this.healthBar = existingHealthBar;
-            this.healthBar.setParentMesh(this.mesh);
-            this.healthBar.setMaxHealth(this.maxHealth);
+            this.healthBar.setParentMesh(this.mesh, 2.5); // Medium offset for sprout
+            // Keep current HP and max HP from seed (should be 10/10)
+            this.maxHealth = this.healthBar.maxHealth;
         } else {
-            this.createHealthBar();
+            this.createHealthBar(2.5); // Medium offset for sprout
             this.setHealth(10); // Default starting health
         }
 
@@ -106,18 +108,24 @@ class Sprout extends SpawnableObject {
         const deltaTime = 0.016; // ~60fps
         this.growthTime += deltaTime;
 
-        // Grow HP over time
-        if (!this.hasMatured && this.getHealth() < this.maxHealth) {
-            const currentHealth = this.getHealth();
-            const newHealth = currentHealth + (this.growthRate * deltaTime);
+        // Grow HP over time (both current and max HP grow together)
+        if (!this.hasMatured && this.maxHealth < 50) {
+            const growthAmount = this.growthRate * deltaTime;
+            const newHealth = this.getHealth() + growthAmount;
+            const newMaxHealth = this.maxHealth + growthAmount;
 
-            if (newHealth >= this.maxHealth) {
+            if (newMaxHealth >= 50) {
                 // Reached maturity - transform to bush
-                this.setHealth(this.maxHealth);
+                this.healthBar.setMaxHealth(50);
+                this.maxHealth = 50;
+                this.setHealth(50);
                 this.hasMatured = true;
                 this.mature();
                 return; // Stop update after maturing (object is disposed)
             } else {
+                // Grow both current and max HP together
+                this.healthBar.setMaxHealth(newMaxHealth);
+                this.maxHealth = newMaxHealth;
                 this.setHealth(newHealth);
             }
         }

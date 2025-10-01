@@ -135,7 +135,7 @@ class Game {
     }
 
     /**
-     * Spawn a bubby at the given position with health from egg
+     * Spawn a baby bubby at the given position with health from egg
      */
     spawnBubby(position, team, health) {
         const bubby = new Bubby(
@@ -143,12 +143,40 @@ class Game {
             position,
             team,
             this.arena.getShadowGenerator(),
-            () => this.getAllSprouts(),
+            () => this.getAllPlants(),
             () => this.getAllBubbies(),
+            (position, team, health) => this.spawnAdultBubby(position, team, health),
             health
         );
 
         this.spawnedObjects.push(bubby);
+    }
+
+    /**
+     * Spawn an adult bubby at the given position
+     */
+    spawnAdultBubby(position, team, health) {
+        const adultBubby = new AdultBubby(
+            this.scene,
+            position,
+            team,
+            this.arena.getShadowGenerator(),
+            () => this.getAllPlants(),
+            () => this.getAllBubbies(),
+            health
+        );
+
+        this.spawnedObjects.push(adultBubby);
+    }
+
+    /**
+     * Get all active plants (sprouts, bushes, trees) in the game
+     */
+    getAllPlants() {
+        return this.spawnedObjects.filter(obj => {
+            const name = obj.constructor.name;
+            return (name === 'Sprout' || name === 'Bush' || name === 'Tree') && obj.isActive;
+        });
     }
 
     /**
@@ -161,11 +189,12 @@ class Game {
     }
 
     /**
-     * Get all active bubbies in the game
+     * Get all active bubbies (baby and adult) in the game
      */
     getAllBubbies() {
         return this.spawnedObjects.filter(obj => {
-            return obj.constructor.name === 'Bubby' && obj.isActive;
+            const name = obj.constructor.name;
+            return (name === 'Bubby' || name === 'AdultBubby') && obj.isActive;
         });
     }
 
@@ -219,10 +248,25 @@ class Game {
             this.scene,
             position,
             this.arena.getShadowGenerator(),
+            (position, healthBar) => this.spawnTree(position, healthBar),
             healthBar
         );
 
         this.spawnedObjects.push(bush);
+    }
+
+    /**
+     * Spawn a tree at the given position with health bar from bush
+     */
+    spawnTree(position, healthBar) {
+        const tree = new Tree(
+            this.scene,
+            position,
+            this.arena.getShadowGenerator(),
+            healthBar
+        );
+
+        this.spawnedObjects.push(tree);
     }
 
     /**

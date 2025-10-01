@@ -18,7 +18,7 @@ class Egg extends SpawnableObject {
 
         this.create();
         this.enableShadows();
-        this.createHealthBar();
+        this.createHealthBar(2.0); // Offset for egg height
         this.setupPhysics();
     }
 

@@ -3,7 +3,8 @@
  */
 class Seed extends SpawnableObject {
     constructor(scene, position, shadowGenerator, onSproutCallback) {
-        super(scene, position, shadowGenerator, 10);
+        // Start with max HP of 5, will grow to 10
+        super(scene, position, shadowGenerator, 5);
 
         this.onSproutCallback = onSproutCallback;
         this.velocity = 0;
@@ -14,12 +15,9 @@ class Seed extends SpawnableObject {
         this.sinkTime = 1.5; // Sink into ground for 1.5 seconds
         this.growthRate = 1.0; // Grow 1 HP per second
 
-        // Start with 5 HP
-        this.setHealth(5);
-
         this.create();
         this.enableShadows();
-        this.createHealthBar();
+        this.createHealthBar(1.5); // Small offset for seed
         this.setupPhysics();
     }
 
@@ -74,9 +72,6 @@ class Seed extends SpawnableObject {
             case 'sinking':
                 this.updateSinking(deltaTime);
                 break;
-            case 'growing':
-                this.updateGrowing(deltaTime);
-                break;
             case 'sprouting':
                 this.updateSprouting(deltaTime);
                 break;
@@ -104,7 +99,7 @@ class Seed extends SpawnableObject {
     }
 
     /**
-     * Update sinking state (seed sinks into ground)
+     * Update sinking state (seed sinks into ground and grows)
      */
     updateSinking(deltaTime) {
         this.stateTime += deltaTime;
@@ -116,28 +111,27 @@ class Seed extends SpawnableObject {
         // Fade out
         this.mesh.material.alpha = 1 - sinkProgress;
 
-        // After sink time, start growing underground
-        if (this.stateTime >= this.sinkTime) {
-            this.state = 'growing';
-            this.stateTime = 0;
-            this.mesh.isVisible = false; // Hide while growing underground
-        }
-    }
+        // Grow while sinking (from 5 HP to 10 HP over 1.5 seconds)
+        const growthAmount = this.growthRate * deltaTime;
+        const newHealth = this.getHealth() + growthAmount;
+        const newMaxHealth = this.maxHealth + growthAmount;
 
-    /**
-     * Update growing state (seed grows underground from 5 HP to 10 HP)
-     */
-    updateGrowing(deltaTime) {
-        // Grow HP over time
-        const currentHealth = this.getHealth();
-        const newHealth = currentHealth + (this.growthRate * deltaTime);
-
-        if (newHealth >= this.maxHealth) {
-            // Reached full growth - time to sprout
-            this.setHealth(this.maxHealth);
-            this.state = 'sprouting';
-        } else {
+        if (newMaxHealth < 10) {
+            // Still growing
+            this.healthBar.setMaxHealth(newMaxHealth);
+            this.maxHealth = newMaxHealth;
             this.setHealth(newHealth);
+        } else {
+            // Cap at 10 HP
+            this.healthBar.setMaxHealth(10);
+            this.maxHealth = 10;
+            this.setHealth(10);
+        }
+
+        // After sink time, immediately sprout
+        if (this.stateTime >= this.sinkTime) {
+            this.state = 'sprouting';
+            this.stateTime = 0;
         }
     }
 
