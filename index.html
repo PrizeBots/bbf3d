@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Castle Battle Arena</title>
+    <style>
+        html, body {
+            overflow: hidden;
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            cursor: pointer;
+        }
+        #renderCanvas {
+            width: 100%;
+            height: 100%;
+            touch-action: none;
+        }
+    </style>
+    <script src="https://cdn.babylonjs.com/babylon.js"></script>
+    <script src="https://cdn.babylonjs.com/gui/babylon.gui.min.js"></script>
+</head>
+<body>
+    <canvas id="renderCanvas"></canvas>
+
+    <!-- Game Classes - Order matters for dependencies -->
+    <script src="src/components/HealthBar.js"></script>
+    <script src="src/controllers/CameraController.js"></script>
+    <script src="src/entities/Arena.js"></script>
+    <script src="src/entities/Castle.js"></script>
+    <script src="src/objects/SpawnableObject.js"></script>
+    <script src="src/objects/Egg.js"></script>
+    <script src="src/objects/Seed.js"></script>
+    <script src="src/objects/Bubby.js"></script>
+    <script src="src/objects/Sprout.js"></script>
+    <script src="src/objects/Bush.js"></script>
+    <script src="src/systems/TargetingSystem.js"></script>
+    <script src="src/ui/UIManager.js"></script>
+    <script src="src/main.js"></script>
+</body>
+</html>
