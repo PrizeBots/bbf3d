@@ -1,7 +1,7 @@
 /**
  * Castle - Represents a team's castle structure
  */
-class Castle {
+export class Castle {
     constructor(scene, team, position, shadowGenerator) {
         this.scene = scene;
         this.team = team;

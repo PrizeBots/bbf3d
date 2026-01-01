@@ -1,7 +1,10 @@
+import { HealthBar } from '../components/HealthBar.js';
+import { GameConstants } from '../config/GameConstants.js';
+
 /**
  * SpawnableObject - Base class for all spawnable game objects
  */
-class SpawnableObject {
+export class SpawnableObject {
     constructor(scene, position, shadowGenerator, maxHealth = 100) {
         this.scene = scene;
         this.position = position.clone();
@@ -11,6 +14,13 @@ class SpawnableObject {
         this.groundLevel = 0;
         this.maxHealth = maxHealth;
         this.healthBar = null;
+        this.draggable = false; // Most objects are not draggable by default
+
+        // Physics properties for drag & drop
+        this.isBeingDragged = false;
+        this.isFallingAfterDrop = false;
+        this.fallVelocity = 0;
+        this.fallGravity = 0.015;
     }
 
     /**
@@ -21,12 +31,25 @@ class SpawnableObject {
     }
 
     /**
+     * Update with delta time - called by game loop
+     */
+    updateWithDelta(deltaTime) {
+        this.deltaTime = deltaTime;
+        this.update();
+    }
+
+    /**
      * Update object state - to be overridden by subclasses
      */
     update() {
         // Update healthbar position
         if (this.healthBar) {
             this.healthBar.updatePosition();
+        }
+
+        // Apply falling physics if object is falling after being dropped
+        if (this.isFallingAfterDrop && this.mesh) {
+            this.updateFallingPhysics();
         }
     }
 
@@ -143,5 +166,83 @@ class SpawnableObject {
      */
     getMesh() {
         return this.mesh;
+    }
+
+    /**
+     * Check if object is draggable
+     */
+    isDraggable() {
+        return this.draggable;
+    }
+
+    /**
+     * Set draggable state
+     */
+    setDraggable(draggable) {
+        this.draggable = draggable;
+    }
+
+    /**
+     * Apply falling physics (for drag & drop)
+     */
+    updateFallingPhysics() {
+        if (this.mesh.position.y > this.groundLevel) {
+            // Apply gravity
+            this.fallVelocity += this.fallGravity;
+            this.mesh.position.y -= this.fallVelocity;
+
+            // Add slight rotation while falling for effect
+            this.mesh.rotation.x += 0.02;
+        } else {
+            // Landed
+            this.mesh.position.y = this.groundLevel;
+            this.mesh.rotation.x = 0;
+            this.isFallingAfterDrop = false;
+            this.fallVelocity = 0;
+            this.onLanded();
+        }
+    }
+
+    /**
+     * Called when object lands after being dropped - to be overridden by subclasses
+     */
+    onLanded() {
+        // Override in subclasses if needed
+    }
+
+    /**
+     * Start being dragged - lift object up
+     */
+    startDrag(liftHeight = 5) {
+        this.isBeingDragged = true;
+        this.isFallingAfterDrop = false;
+
+        if (this.mesh) {
+            // Smoothly lift to drag height
+            this.mesh.position.y = liftHeight;
+        }
+    }
+
+    /**
+     * End drag - start falling
+     */
+    endDrag() {
+        this.isBeingDragged = false;
+        this.isFallingAfterDrop = true;
+        this.fallVelocity = 0;
+    }
+
+    /**
+     * Pause AI/physics for dragging - to be overridden by subclasses
+     */
+    pauseAI() {
+        // Override in subclasses that have AI/physics
+    }
+
+    /**
+     * Resume AI/physics after dragging - to be overridden by subclasses
+     */
+    resumeAI() {
+        // Override in subclasses that have AI/physics
     }
 }

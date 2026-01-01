@@ -1,7 +1,7 @@
 /**
  * CameraController - Manages camera setup and controls
  */
-class CameraController {
+export class CameraController {
     constructor(scene, canvas) {
         this.scene = scene;
         this.canvas = canvas;
@@ -9,6 +9,7 @@ class CameraController {
         this.keysPressed = {};
         this.cameraSpeed = 0.3;
         this.onCameraMoveCallback = null;
+        this.isFrozen = true; // Camera starts frozen
 
         this.setupCamera();
         this.setupControls();
@@ -31,8 +32,8 @@ class CameraController {
         this.camera.lowerBetaLimit = Math.PI / 4;
         this.camera.upperBetaLimit = Math.PI / 2;
 
-        // Disable default camera controls
-        this.camera.attachControl(this.canvas, false);
+        // Camera starts frozen, so don't attach controls
+        // They will be attached when unfrozen
     }
 
     /**
@@ -94,5 +95,43 @@ class CameraController {
      */
     setOnCameraMoveCallback(callback) {
         this.onCameraMoveCallback = callback;
+    }
+
+    /**
+     * Freeze camera (disable mouse controls)
+     */
+    freezeCamera() {
+        this.isFrozen = true;
+        if (this.camera) {
+            this.camera.detachControl();
+        }
+    }
+
+    /**
+     * Unfreeze camera (enable mouse controls)
+     */
+    unfreezeCamera() {
+        this.isFrozen = false;
+        if (this.camera) {
+            this.camera.attachControl(this.canvas, false);
+        }
+    }
+
+    /**
+     * Set camera freeze state
+     */
+    setCameraFrozen(frozen) {
+        if (frozen) {
+            this.freezeCamera();
+        } else {
+            this.unfreezeCamera();
+        }
+    }
+
+    /**
+     * Check if camera is frozen
+     */
+    isCameraFrozen() {
+        return this.isFrozen;
     }
 }

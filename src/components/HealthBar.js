@@ -1,7 +1,7 @@
 /**
  * HealthBar - Visual health indicator for game objects
  */
-class HealthBar {
+export class HealthBar {
     constructor(scene, parentMesh, maxHealth = 100, offsetY = 2.5) {
         this.scene = scene;
         this.parentMesh = parentMesh;

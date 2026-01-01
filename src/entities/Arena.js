@@ -1,7 +1,7 @@
 /**
  * Arena - Manages the game arena including ground, lighting, and shadows
  */
-class Arena {
+export class Arena {
     constructor(scene) {
         this.scene = scene;
         this.ground = null;

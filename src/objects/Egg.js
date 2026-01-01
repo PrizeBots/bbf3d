@@ -1,7 +1,10 @@
+import { SpawnableObject } from './SpawnableObject.js';
+import { GameConstants } from '../config/GameConstants.js';
+
 /**
  * Egg - Spawnable egg object with falling physics and hatching behavior
  */
-class Egg extends SpawnableObject {
+export class Egg extends SpawnableObject {
     constructor(scene, position, team, shadowGenerator, onHatchCallback) {
         super(scene, position, shadowGenerator, 100); // 100 max health
 
@@ -15,10 +18,13 @@ class Egg extends SpawnableObject {
         this.stateTime = 0;
         this.wiggleTime = 2.0; // Wiggle for 2 seconds
         this.crackTime = 1.0; // Crack for 1 second
+        this.isPaused = false; // For drag system
+
+        this.draggable = true; // Eggs are draggable
 
         this.create();
         this.enableShadows();
-        this.createHealthBar(2.0); // Offset for egg height
+        this.createHealthBar(1.5); // Just above egg top
         this.setupPhysics();
     }
 
@@ -54,23 +60,21 @@ class Egg extends SpawnableObject {
      * Setup falling physics
      */
     setupPhysics() {
-        this.updateObserver = this.scene.onBeforeRenderObservable.add(() => {
-            this.update();
-        });
+        // No longer needed - game loop calls update directly
     }
 
     /**
      * Update egg state (falling, wiggling, cracking, hatching)
      */
     update() {
-        if (!this.mesh || !this.isActive) {
+        if (!this.mesh || !this.isActive || this.isPaused) {
             return;
         }
 
         // Call parent update for healthbar
         super.update();
 
-        const deltaTime = 0.016; // ~60fps
+        const deltaTime = this.deltaTime || 0.016; // Use game loop deltaTime
 
         switch (this.state) {
             case 'falling':
@@ -124,6 +128,9 @@ class Egg extends SpawnableObject {
         this.mesh.position.x += Math.sin(this.stateTime * 3) * moveAmount * deltaTime;
         this.mesh.position.z += Math.cos(this.stateTime * 2.5) * moveAmount * deltaTime;
 
+        // Constrain to arena bounds
+        this.constrainToArena();
+
         // After wiggle time, start cracking
         if (this.stateTime >= this.wiggleTime) {
             this.state = 'cracking';
@@ -175,6 +182,31 @@ class Egg extends SpawnableObject {
     }
 
     /**
+     * Constrain position to arena bounds
+     */
+    constrainToArena() {
+        if (!this.mesh) {
+            return;
+        }
+
+        // Arena bounds (grass field is 160 wide x 40 deep)
+        const maxX = 78; // Slightly inside to keep fully on grass
+        const maxZ = 18;
+
+        if (this.mesh.position.x < -maxX) {
+            this.mesh.position.x = -maxX;
+        } else if (this.mesh.position.x > maxX) {
+            this.mesh.position.x = maxX;
+        }
+
+        if (this.mesh.position.z < -maxZ) {
+            this.mesh.position.z = -maxZ;
+        } else if (this.mesh.position.z > maxZ) {
+            this.mesh.position.z = maxZ;
+        }
+    }
+
+    /**
      * Check if egg is still falling
      */
     isFallingActive() {
@@ -182,13 +214,47 @@ class Egg extends SpawnableObject {
     }
 
     /**
+     * Start being dragged - lift object up
+     */
+    startDrag(liftHeight = 8) {
+        super.startDrag(liftHeight);
+        // Eggs have their own falling physics, so don't use base class falling
+        this.isFallingAfterDrop = false;
+    }
+
+    /**
+     * End drag - reset to falling state
+     */
+    endDrag() {
+        // Don't use base class falling physics
+        this.isFallingAfterDrop = false;
+        this.isBeingDragged = false;
+
+        // Reset to falling state with egg's own physics
+        this.state = 'falling';
+        this.velocity = 0;
+        this.isFalling = true;
+    }
+
+    /**
+     * Pause AI/physics for dragging
+     */
+    pauseAI() {
+        this.isPaused = true;
+    }
+
+    /**
+     * Resume AI/physics after dragging
+     */
+    resumeAI() {
+        this.isPaused = false;
+    }
+
+    /**
      * Dispose egg and clean up
      */
     dispose() {
-        if (this.updateObserver) {
-            this.scene.onBeforeRenderObservable.remove(this.updateObserver);
-            this.updateObserver = null;
-        }
+        // updateObserver no longer used
         super.dispose();
     }
 }

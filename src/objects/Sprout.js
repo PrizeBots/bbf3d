@@ -1,16 +1,22 @@
+import { SpawnableObject } from './SpawnableObject.js';
+import { GameConstants } from '../config/GameConstants.js';
+
 /**
  * Sprout - Green plant that grows from seed
  */
-class Sprout extends SpawnableObject {
-    constructor(scene, position, shadowGenerator, onMatureCallback, existingHealthBar = null) {
-        // Start with initial max HP of 10, will grow to 50
-        super(scene, position, shadowGenerator, 10);
+export class Sprout extends SpawnableObject {
+    constructor(scene, position, shadowGenerator, onMatureCallback, existingHealthBar = null, team = null) {
+        // Start with initial max HP from constants
+        super(scene, position, shadowGenerator, GameConstants.PLANT.SPROUT_START_HP);
 
         this.growthTime = 0;
         this.swayPhase = 0;
         this.onMatureCallback = onMatureCallback; // Callback when sprout matures to bush
-        this.growthRate = 4.0; // HP gained per second (1 HP per 0.25 seconds)
+        this.growthRate = GameConstants.PLANT.SPROUT_GROWTH_RATE;
         this.hasMatured = false;
+
+        // Determine team based on position if not provided
+        this.team = team || (position.x < 0 ? 'red' : 'blue');
 
         this.create();
         this.enableShadows();
@@ -18,12 +24,12 @@ class Sprout extends SpawnableObject {
         // Use existing health bar or create new one
         if (existingHealthBar) {
             this.healthBar = existingHealthBar;
-            this.healthBar.setParentMesh(this.mesh, 2.5); // Medium offset for sprout
+            this.healthBar.setParentMesh(this.mesh, 0.95); // Consistent padding
             // Keep current HP and max HP from seed (should be 10/10)
             this.maxHealth = this.healthBar.maxHealth;
         } else {
-            this.createHealthBar(2.5); // Medium offset for sprout
-            this.setHealth(10); // Default starting health
+            this.createHealthBar(0.95); // Consistent padding: 0.75 height + 0.2 padding
+            this.setHealth(GameConstants.PLANT.SPROUT_START_HP);
         }
 
         this.setupGrowthBehavior();
@@ -89,9 +95,7 @@ class Sprout extends SpawnableObject {
      * Setup growth and idle behavior
      */
     setupGrowthBehavior() {
-        this.updateObserver = this.scene.onBeforeRenderObservable.add(() => {
-            this.update();
-        });
+        // No longer needed - game loop calls update directly
     }
 
     /**
@@ -105,20 +109,20 @@ class Sprout extends SpawnableObject {
         // Call parent update to handle healthbar
         super.update();
 
-        const deltaTime = 0.016; // ~60fps
+        const deltaTime = this.deltaTime || 0.016; // Use game loop deltaTime
         this.growthTime += deltaTime;
 
         // Grow HP over time (both current and max HP grow together)
-        if (!this.hasMatured && this.maxHealth < 50) {
+        if (!this.hasMatured && this.maxHealth < GameConstants.PLANT.SPROUT_MATURE_HP) {
             const growthAmount = this.growthRate * deltaTime;
             const newHealth = this.getHealth() + growthAmount;
             const newMaxHealth = this.maxHealth + growthAmount;
 
-            if (newMaxHealth >= 50) {
+            if (newMaxHealth >= GameConstants.PLANT.SPROUT_MATURE_HP) {
                 // Reached maturity - transform to bush
-                this.healthBar.setMaxHealth(50);
-                this.maxHealth = 50;
-                this.setHealth(50);
+                this.healthBar.setMaxHealth(GameConstants.PLANT.SPROUT_MATURE_HP);
+                this.maxHealth = GameConstants.PLANT.SPROUT_MATURE_HP;
+                this.setHealth(GameConstants.PLANT.SPROUT_MATURE_HP);
                 this.hasMatured = true;
                 this.mature();
                 return; // Stop update after maturing (object is disposed)
@@ -143,8 +147,8 @@ class Sprout extends SpawnableObject {
      */
     mature() {
         if (this.onMatureCallback) {
-            // Pass health bar to bush so it persists
-            this.onMatureCallback(this.mesh.position.clone(), this.healthBar);
+            // Pass health bar and team to bush so it persists
+            this.onMatureCallback(this.mesh.position.clone(), this.healthBar, this.team);
         }
         this.disposeWithoutHealthBar();
     }
@@ -153,10 +157,7 @@ class Sprout extends SpawnableObject {
      * Dispose sprout without disposing health bar (for transformation)
      */
     disposeWithoutHealthBar() {
-        if (this.updateObserver) {
-            this.scene.onBeforeRenderObservable.remove(this.updateObserver);
-            this.updateObserver = null;
-        }
+        // updateObserver no longer used
         if (this.mesh) {
             this.mesh.dispose();
             this.mesh = null;
@@ -169,10 +170,7 @@ class Sprout extends SpawnableObject {
      * Dispose sprout and clean up
      */
     dispose() {
-        if (this.updateObserver) {
-            this.scene.onBeforeRenderObservable.remove(this.updateObserver);
-            this.updateObserver = null;
-        }
+        // updateObserver no longer used
         super.dispose();
     }
 }
