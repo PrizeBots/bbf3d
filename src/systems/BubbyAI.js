@@ -178,7 +178,17 @@ export class BubbyAI {
                 continue;
             }
 
-            const distance = BABYLON.Vector3.Distance(ownerPos, obj.mesh.position);
+            // Get object position - support both mesh.position and getPosition()
+            let objPos;
+            if (obj.getPosition) {
+                objPos = obj.getPosition();
+            } else if (obj.mesh && obj.mesh.position) {
+                objPos = obj.mesh.position;
+            } else {
+                continue;
+            }
+
+            const distance = BABYLON.Vector3.Distance(ownerPos, objPos);
 
             if (distance <= nearestDistance) {
                 nearestDistance = distance;
@@ -191,53 +201,60 @@ export class BubbyAI {
 
     /**
      * Check if target is within attack range
-     * @param {Object} target - Target object with mesh
+     * @param {Object} target - Target object with mesh or getPosition method
      * @returns {boolean} - True if within attack range
      */
     isInAttackRange(target) {
-        if (!target || !target.mesh || !this.owner.mesh) {
-            return false;
-        }
-
-        const distance = BABYLON.Vector3.Distance(
-            this.owner.mesh.position,
-            target.mesh.position
-        );
-
+        const distance = this.getDistanceTo(target);
         return distance <= this.config.ATTACK_RANGE;
     }
 
     /**
      * Check if target is within sensing range
-     * @param {Object} target - Target object with mesh
+     * @param {Object} target - Target object with mesh or getPosition method
      * @returns {boolean} - True if within sensing range
      */
     isInSensingRange(target) {
-        if (!target || !target.mesh || !this.owner.mesh) {
-            return false;
-        }
-
-        const distance = BABYLON.Vector3.Distance(
-            this.owner.mesh.position,
-            target.mesh.position
-        );
-
+        const distance = this.getDistanceTo(target);
         return distance <= this.config.SENSING_RANGE;
     }
 
     /**
      * Get distance to a target
-     * @param {Object} target - Target object with mesh
+     * @param {Object} target - Target object with mesh or getPosition method
      * @returns {number} - Distance to target, or Infinity if invalid
      */
     getDistanceTo(target) {
-        if (!target || !target.mesh || !this.owner.mesh) {
+        if (!target || !this.owner.mesh) {
+            return Infinity;
+        }
+
+        // Get target position - support both mesh.position and getPosition()
+        let targetPos;
+        if (target.getPosition) {
+            targetPos = target.getPosition();
+        } else if (target.mesh && target.mesh.position) {
+            targetPos = target.mesh.position;
+        } else {
             return Infinity;
         }
 
         return BABYLON.Vector3.Distance(
             this.owner.mesh.position,
-            target.mesh.position
+            targetPos
         );
+    }
+
+    /**
+     * Get position from a target object (handles various object types)
+     * @param {Object} target - Target object
+     * @returns {BABYLON.Vector3|null} - Position or null if not found
+     */
+    getTargetPosition(target) {
+        if (!target) return null;
+        if (target.getPosition) return target.getPosition();
+        if (target.mesh && target.mesh.position) return target.mesh.position;
+        if (target.position) return target.position;
+        return null;
     }
 }

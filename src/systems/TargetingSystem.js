@@ -37,12 +37,9 @@ export class TargetingSystem {
             if (pointerInfo.type === BABYLON.PointerEventTypes.POINTERMOVE) {
                 this.updateTargetFromRaycast(pointerInfo.event);
             } else if (pointerInfo.type === BABYLON.PointerEventTypes.POINTERDOWN) {
-                // Check if click is on UI (ignore if so)
-                if (pointerInfo.pickInfo && pointerInfo.pickInfo.hit) {
-                    // Click on game area - place the object
-                    this.handlePlacement();
-                } else {
-                    // Clicked on empty space (but still valid ground position from raycast)
+                // Only handle placement if we have a callback (desktop click-to-place mode)
+                // Mobile drag-to-place uses null callback and handles placement on pointer up
+                if (this.onPlaceCallback) {
                     this.handlePlacement();
                 }
             }

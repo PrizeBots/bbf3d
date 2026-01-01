@@ -13,11 +13,19 @@ import { Sprout } from './objects/Sprout.js';
 import { Bush } from './objects/Bush.js';
 import { Tree } from './objects/Tree.js';
 import { Fruit } from './objects/Fruit.js';
+import { WoodChunk } from './objects/WoodChunk.js';
+import { StonePiece } from './objects/StonePiece.js';
+import { StoneDeposit } from './entities/StoneDeposit.js';
+import { SoldierBubby } from './objects/SoldierBubby.js';
 import { Turret } from './objects/Turret.js';
 import { Armory } from './objects/Armory.js';
 import { TargetingSystem } from './systems/TargetingSystem.js';
 import { DragSystem } from './systems/DragSystem.js';
 import { UIManager } from './ui/UIManager.js';
+import { PlayerCursor } from './ui/PlayerCursor.js';
+import { AIPlayer } from './systems/AIPlayer.js';
+import { AttackEffects } from './systems/AttackEffects.js';
+import { soundManager } from './systems/SoundManager.js';
 
 /**
  * Game - Main game controller and orchestrator
@@ -32,9 +40,13 @@ class Game {
         this.uiManager = null;
         this.targetingSystem = null;
         this.dragSystem = null;
+        this.playerCursor = null;
+        this.aiPlayer = null;
         this.castles = [];
+        this.stoneDeposits = [];
         this.spawnedObjects = [];
         this.currentTargetType = null;
+        this.attackEffects = null;
 
         // Cleanup tracking
         this.updateFrameCount = 0;
@@ -57,6 +69,10 @@ class Game {
         this.arena = new Arena(this.scene);
         this.setupCastles();
         this.uiManager = new UIManager(this.scene, this.canvas);
+        this.attackEffects = new AttackEffects(this.scene);
+
+        // Wire up UIManager to CameraController for mobile controls
+        this.cameraController.setUIManager(this.uiManager);
 
         // Initialize targeting system
         this.targetingSystem = new TargetingSystem(
@@ -73,6 +89,31 @@ class Game {
             () => this.getAllDraggableObjects()
         );
 
+        // Initialize player cursor (white glove hand)
+        this.playerCursor = new PlayerCursor(
+            this.scene,
+            this.cameraController.getCamera(),
+            'red' // Player team
+        );
+
+        // Wire cursor gestures to drag system
+        this.dragSystem.setOnDragStartCallback(() => {
+            this.playerCursor.setGesture('grabbing');
+        });
+        this.dragSystem.setOnDragEndCallback(() => {
+            this.playerCursor.setGesture('pointing');
+        });
+        this.dragSystem.setOnHoverCallback((isHovering) => {
+            if (isHovering) {
+                this.playerCursor.setGesture('open');
+            } else {
+                this.playerCursor.setGesture('pointing');
+            }
+        });
+
+        // Setup drag-drop task assignment for bubbies
+        this.dragSystem.setGetAllTaskTargets(() => this.getAllTaskTargets());
+
         // Sync targeting system with camera movement
         this.cameraController.setOnCameraMoveCallback((x) => {
             if (this.targetingSystem && this.targetingSystem.isTargeting()) {
@@ -87,6 +128,25 @@ class Game {
         this.uiManager.registerCameraFreezeCallback((frozen) => {
             this.cameraController.setCameraFrozen(frozen);
         });
+
+        // Register debug drop bubby callback
+        this.uiManager.setOnDropBubbyCallback(() => {
+            this.debugDropBubby();
+        });
+
+        // Register debug drop soldier callback
+        this.uiManager.setOnDropSoldierCallback(() => {
+            this.debugDropSoldier();
+        });
+
+        // Setup castle click handlers for HQ menu
+        this.setupCastleClickHandlers();
+
+        // Setup initial stone deposits on the arena
+        this.setupStoneDeposits();
+
+        // Initialize AI player (blue team)
+        this.setupAIPlayer();
 
         // Start render loop
         this.startRenderLoop();
@@ -121,18 +181,227 @@ class Game {
     }
 
     /**
+     * Setup castle click handlers (called after UI is ready)
+     */
+    setupCastleClickHandlers() {
+        this.castles.forEach(castle => {
+            castle.setOnClickCallback((clickedCastle) => {
+                // Only open menu for player's team (red)
+                if (clickedCastle.getTeam() === 'red') {
+                    this.openHQMenu(clickedCastle);
+                }
+            });
+
+            // Setup resource deposit callback for real-time UI updates
+            castle.setOnResourceDepositCallback((depositCastle) => {
+                this.uiManager.onResourceDeposited(depositCastle);
+            });
+        });
+    }
+
+    /**
+     * Setup initial stone deposits on the arena
+     * These are predetermined positions to help tune stage difficulty
+     */
+    setupStoneDeposits() {
+        // Place stone deposits in strategic locations across the arena
+        // Safe Z range: ±12 to keep boulder piles fully on the arena (depth 40, boulders ~3 unit radius)
+        const depositPositions = [
+            // Center area - near edges but safe
+            new BABYLON.Vector3(0, 0, 12),
+            new BABYLON.Vector3(0, 0, -12),
+            // Left side (closer to red castle)
+            new BABYLON.Vector3(-35, 0, 8),
+            new BABYLON.Vector3(-35, 0, -8),
+            // Right side (closer to blue castle)
+            new BABYLON.Vector3(35, 0, 8),
+            new BABYLON.Vector3(35, 0, -8),
+            // Mid-field positions - kept within safe bounds
+            new BABYLON.Vector3(-20, 0, 12),
+            new BABYLON.Vector3(20, 0, -12)
+        ];
+
+        depositPositions.forEach(position => {
+            this.spawnStoneDeposit(position);
+        });
+    }
+
+    /**
+     * Setup AI player for blue team
+     */
+    setupAIPlayer() {
+        this.aiPlayer = new AIPlayer(this.scene, this.cameraController.getCamera(), {
+            spawnEgg: (position) => this.spawnEggForTeam(position, 'blue'),
+            spawnSeed: (position) => this.spawnSeedForTeam(position, 'blue'),
+            spawnArmory: (position) => this.spawnArmoryForTeam(position, 'blue'),
+            spawnTurret: (position) => this.spawnTurretForTeam(position, 'blue'),
+            getCastle: () => this.getCastleByTeam('blue'),
+            getEnemyCastle: () => this.getCastleByTeam('red'),
+            getAllBubbies: () => this.getAllBubbies(),
+            getAllPlants: () => this.getAllPlants(),
+            getAllArmories: () => this.getAllArmories('blue')
+        });
+
+        // Set initial difficulty - medium provides a good challenge
+        this.aiPlayer.setDifficulty('medium');
+    }
+
+    /**
+     * Spawn an egg for a specific team (used by AI)
+     */
+    spawnEggForTeam(spawnPosition, team) {
+        const egg = new Egg(
+            this.scene,
+            spawnPosition,
+            team,
+            this.arena.getShadowGenerator(),
+            (position, eggTeam) => this.spawnBubby(position, eggTeam)
+        );
+
+        this.spawnedObjects.push(egg);
+    }
+
+    /**
+     * Spawn a seed for a specific team (used by AI)
+     */
+    spawnSeedForTeam(spawnPosition, team) {
+        const seed = new Seed(
+            this.scene,
+            spawnPosition,
+            this.arena.getShadowGenerator(),
+            (position, healthBar, seedTeam) => this.spawnSprout(position, healthBar, seedTeam),
+            team
+        );
+
+        this.spawnedObjects.push(seed);
+    }
+
+    /**
+     * Spawn an armory for a specific team (used by AI)
+     */
+    spawnArmoryForTeam(spawnPosition, team) {
+        const armory = new Armory(
+            this.scene,
+            spawnPosition,
+            this.arena.getShadowGenerator(),
+            team
+        );
+
+        // Wire up armory callbacks
+        armory.getCastle = () => this.getCastleByTeam(team);
+        armory.setOnClickCallback((clickedArmory) => {
+            // Only open menu for player's team (red)
+            if (clickedArmory.team === 'red') {
+                this.openArmoryMenu(clickedArmory);
+            }
+        });
+
+        this.spawnedObjects.push(armory);
+    }
+
+    /**
+     * Spawn a turret for a specific team (used by AI)
+     */
+    spawnTurretForTeam(spawnPosition, team) {
+        const enemyTeam = team === 'red' ? 'blue' : 'red';
+
+        const turret = new Turret(
+            this.scene,
+            spawnPosition,
+            this.arena.getShadowGenerator(),
+            team
+        );
+
+        // Wire up turret callbacks for enemy detection and effects
+        turret.setGetEnemyUnits(() => this.getEnemyUnits(enemyTeam));
+        turret.setAttackEffects(this.attackEffects);
+        turret.setSoundManager(soundManager);
+
+        this.spawnedObjects.push(turret);
+    }
+
+    /**
+     * Open HQ menu for a castle
+     */
+    openHQMenu(castle) {
+        this.uiManager.showHQBuildMenu(castle, (castleToSell) => {
+            this.sellFruit(castleToSell);
+        });
+    }
+
+    /**
+     * Sell a fruit from the castle inventory
+     */
+    sellFruit(castle) {
+        if (castle.sellFruit()) {
+            // Create coin animation from castle position
+            const castlePos = castle.getPosition();
+            const coinStartPos = new BABYLON.Vector3(
+                castlePos.x,
+                castlePos.y + 8, // Top of castle
+                castlePos.z
+            );
+
+            // Get screen position of coin counter
+            const targetScreenPos = this.uiManager.getCoinCounterScreenPosition();
+
+            // Create coin with callback to increment counter when it arrives
+            const coin = new Coin(
+                this.scene,
+                coinStartPos,
+                targetScreenPos,
+                () => {
+                    // Increment coin count in UI
+                    this.uiManager.addCoins(GameConstants.ECONOMY.FRUIT_SELL_VALUE);
+                }
+            );
+
+            this.spawnedObjects.push(coin);
+        }
+    }
+
+    /**
+     * Get castle by team
+     */
+    getCastleByTeam(team) {
+        return this.castles.find(c => c.getTeam() === team);
+    }
+
+    /**
      * Register spawn handlers for UI buttons
      */
     registerSpawnHandlers() {
-        // Egg button - click to enter placement mode
-        this.uiManager.registerSelectCallback("egg", () => this.startPlacementMode("egg"));
+        const objectTypes = ["egg", "seed", "turret", "armory"];
 
-        // Seed button - click to enter placement mode
-        this.uiManager.registerSelectCallback("seed", () => this.startPlacementMode("seed"));
+        objectTypes.forEach(objectType => {
+            // Desktop: click to enter placement mode
+            this.uiManager.registerSelectCallback(objectType, () => this.startPlacementMode(objectType));
 
-        // Building type handlers (from submenu)
-        this.uiManager.registerSelectCallback("turret", () => this.startPlacementMode("turret"));
-        this.uiManager.registerSelectCallback("armory", () => this.startPlacementMode("armory"));
+            // Mobile: drag to place
+            this.uiManager.registerDragStartCallback(objectType, () => this.startDragPlacement(objectType));
+            this.uiManager.registerDragEndCallback(objectType, () => this.endDragPlacement(objectType));
+        });
+    }
+
+    /**
+     * Start drag placement mode (mobile) - targeting follows finger
+     */
+    startDragPlacement(objectType) {
+        this.currentTargetType = objectType;
+        // Activate targeting without callback - we'll place on drag end
+        this.targetingSystem.activate(null);
+    }
+
+    /**
+     * End drag placement (mobile) - place at current target position
+     */
+    endDragPlacement(objectType) {
+        if (!this.targetingSystem.isTargeting()) {
+            return;
+        }
+
+        const targetPosition = this.targetingSystem.getTargetPosition();
+        this.handlePlacement(objectType, targetPosition);
     }
 
     /**
@@ -176,6 +445,11 @@ class Game {
         this.targetingSystem.deactivate();
         this.uiManager.onPlacementComplete();
         this.currentTargetType = null;
+
+        // Flash thumbs up gesture on cursor
+        if (this.playerCursor) {
+            this.playerCursor.flashThumbsUp(400);
+        }
     }
 
     /**
@@ -205,7 +479,9 @@ class Game {
             getAllBubbies: () => this.getAllBubbies(),
             getAllFruits: () => this.getAllFruits(),
             onMatureCallback: (pos, t, h) => this.spawnAdultBubby(pos, t, h),
-            initialHealth: health
+            initialHealth: health,
+            attackEffects: this.attackEffects,
+            soundManager: soundManager
         });
 
         this.spawnedObjects.push(bubby);
@@ -215,6 +491,8 @@ class Game {
      * Spawn an adult bubby at the given position
      */
     spawnAdultBubby(position, team, health) {
+        const enemyTeam = team === 'red' ? 'blue' : 'red';
+
         const adultBubby = new AdultBubby(this.scene, {
             position: position,
             team: team,
@@ -222,32 +500,63 @@ class Game {
             getAllPlants: () => this.getAllPlants(),
             getAllBubbies: () => this.getAllBubbies(),
             getAllFruits: () => this.getAllFruits(),
+            getAllWoodChunks: () => this.getAllWoodChunks(),
+            getAllHarvestableTrees: () => this.getAllHarvestableTrees(),
+            getAllStonePieces: () => this.getAllStonePieces(),
+            getAllStoneDeposits: () => this.getAllStoneDeposits(),
+            getAllArmories: () => this.getAllArmories(team),
+            getEnemyUnits: () => this.getEnemyUnits(enemyTeam),
+            getEnemyBuildings: () => this.getEnemyBuildings(enemyTeam),
+            getEnemyCastle: () => this.getCastleByTeam(enemyTeam),
             initialHealth: health,
-            onCoinEarnedCallback: (pos, t, val) => this.spawnCoin(pos, t, val)
+            getCastle: () => this.getCastleByTeam(team),
+            attackEffects: this.attackEffects,
+            soundManager: soundManager
         });
 
         this.spawnedObjects.push(adultBubby);
     }
 
     /**
-     * Spawn a coin that flies to UI when fruit is deposited
+     * Debug: Drop a full grown adult bubby on the player's side
      */
-    spawnCoin(depositPosition, team, coinValue) {
-        // Get screen position of coin counter
-        const targetScreenPos = this.uiManager.getCoinCounterScreenPosition();
+    debugDropBubby() {
+        // Random position on player (red) side
+        const x = -20 - Math.random() * 30; // Between -20 and -50
+        const z = (Math.random() - 0.5) * 30; // Between -15 and 15
+        const dropHeight = GameConstants.PHYSICS.SPAWN_DROP_HEIGHT;
 
-        // Create coin with callback to increment counter when it arrives
-        const coin = new Coin(
-            this.scene,
-            depositPosition,
-            targetScreenPos,
-            () => {
-                // Increment coin count in UI
-                this.uiManager.addCoins(coinValue);
-            }
-        );
+        const position = new BABYLON.Vector3(x, dropHeight, z);
 
-        this.spawnedObjects.push(coin);
+        // Spawn adult bubby with full health
+        this.spawnAdultBubby(position, 'red', GameConstants.ADULT_BUBBY.MAX_HP);
+
+        console.log(`Debug: Dropped adult bubby at (${x.toFixed(1)}, ${z.toFixed(1)})`);
+    }
+
+    /**
+     * Debug: Drop a soldier bubby (with sword) on the player's side
+     */
+    debugDropSoldier() {
+        // Random position on player (red) side
+        const x = -20 - Math.random() * 30; // Between -20 and -50
+        const z = (Math.random() - 0.5) * 30; // Between -15 and 15
+        const dropHeight = GameConstants.PHYSICS.SPAWN_DROP_HEIGHT;
+
+        const position = new BABYLON.Vector3(x, dropHeight, z);
+
+        // Spawn adult bubby with full health
+        this.spawnAdultBubby(position, 'red', GameConstants.ADULT_BUBBY.MAX_HP);
+
+        // Get the just-spawned bubby and equip it with a sword
+        const soldier = this.spawnedObjects[this.spawnedObjects.length - 1];
+        if (soldier && soldier.isSoldier !== undefined) {
+            soldier.isSoldier = true;
+            soldier.equippedSword = true;
+            soldier.createSwordVisual();
+        }
+
+        console.log(`Debug: Dropped soldier bubby at (${x.toFixed(1)}, ${z.toFixed(1)})`);
     }
 
     /**
@@ -266,6 +575,109 @@ class Game {
         return this.spawnedObjects.filter(obj => {
             return obj instanceof Fruit && obj.isActive;
         });
+    }
+
+    /**
+     * Get all wood chunks that can be picked up
+     */
+    getAllWoodChunks() {
+        return this.spawnedObjects.filter(obj => {
+            return obj instanceof WoodChunk && obj.isActive && obj.canBePickedUp && obj.canBePickedUp();
+        });
+    }
+
+    /**
+     * Get all harvestable dead trees (trunk only)
+     */
+    getAllHarvestableTrees() {
+        return this.spawnedObjects.filter(obj => {
+            return obj instanceof Tree && obj.isActive && obj.canBeHarvested && obj.canBeHarvested();
+        });
+    }
+
+    /**
+     * Get all stone pieces that can be picked up
+     */
+    getAllStonePieces() {
+        return this.spawnedObjects.filter(obj => {
+            return obj instanceof StonePiece && obj.isActive && obj.canBePickedUp && obj.canBePickedUp();
+        });
+    }
+
+    /**
+     * Get all armories for a specific team
+     */
+    getAllArmories(team = null) {
+        return this.spawnedObjects.filter(obj => {
+            if (!(obj instanceof Armory) || !obj.isActive) return false;
+            if (team && obj.team !== team) return false;
+            return true;
+        });
+    }
+
+    /**
+     * Get all active stone deposits that can be mined
+     */
+    getAllStoneDeposits() {
+        return this.stoneDeposits.filter(deposit => deposit.isActive && deposit.canBeMined());
+    }
+
+    /**
+     * Get all valid task targets for drag-drop assignment
+     * Returns array of { target, taskType } objects
+     */
+    getAllTaskTargets() {
+        const targets = [];
+
+        // Harvestable trees (dead trunks)
+        this.getAllHarvestableTrees().forEach(tree => {
+            targets.push({ target: tree, taskType: 'harvest_tree' });
+        });
+
+        // Mineable stone deposits
+        this.getAllStoneDeposits().forEach(deposit => {
+            targets.push({ target: deposit, taskType: 'mine_deposit' });
+        });
+
+        // Collectible fruits
+        this.getAllFruits().forEach(fruit => {
+            targets.push({ target: fruit, taskType: 'gather_fruit' });
+        });
+
+        // Collectible wood chunks
+        this.getAllWoodChunks().forEach(wood => {
+            targets.push({ target: wood, taskType: 'gather_wood' });
+        });
+
+        // Collectible stone pieces
+        this.getAllStonePieces().forEach(stone => {
+            targets.push({ target: stone, taskType: 'gather_stone' });
+        });
+
+        // Armories with swords (for soldier assignment)
+        this.getAllArmories('red').forEach(armory => {
+            if (armory.hasSword()) {
+                targets.push({ target: armory, taskType: 'soldier' });
+            }
+        });
+
+        // Enemy units (for attack targeting)
+        this.getEnemyUnits('blue').forEach(unit => {
+            targets.push({ target: unit, taskType: 'attack' });
+        });
+
+        // Enemy buildings (for attack targeting)
+        this.getEnemyBuildings('blue').forEach(building => {
+            targets.push({ target: building, taskType: 'attack_building' });
+        });
+
+        // Enemy castle (for attack targeting)
+        const enemyCastle = this.getCastleByTeam('blue');
+        if (enemyCastle && enemyCastle.isActive) {
+            targets.push({ target: enemyCastle, taskType: 'attack_building' });
+        }
+
+        return targets;
     }
 
     /**
@@ -355,7 +767,57 @@ class Game {
             (fruitPosition, fruitTeam, parentTree) => this.spawnFruit(fruitPosition, fruitTeam, parentTree)
         );
 
+        // Set wood chunk spawn callback for when trunk is harvested
+        tree.onWoodChunkSpawnCallback = (chunkPosition, chunkTeam) => {
+            this.spawnWoodChunk(chunkPosition, chunkTeam);
+        };
+
         this.spawnedObjects.push(tree);
+    }
+
+    /**
+     * Spawn a wood chunk from a harvested tree trunk
+     */
+    spawnWoodChunk(position, team) {
+        const woodChunk = new WoodChunk(
+            this.scene,
+            position,
+            this.arena.getShadowGenerator(),
+            team
+        );
+
+        this.spawnedObjects.push(woodChunk);
+    }
+
+    /**
+     * Spawn a stone piece from a mined stone deposit
+     */
+    spawnStonePiece(position) {
+        const stonePiece = new StonePiece(
+            this.scene,
+            position,
+            this.arena.getShadowGenerator()
+        );
+
+        this.spawnedObjects.push(stonePiece);
+    }
+
+    /**
+     * Spawn a stone deposit at the given position
+     */
+    spawnStoneDeposit(position) {
+        const stoneDeposit = new StoneDeposit(
+            this.scene,
+            position,
+            this.arena.getShadowGenerator()
+        );
+
+        // Wire up callback for spawning stone pieces when mined
+        stoneDeposit.onStonePieceSpawnCallback = (piecePosition) => {
+            this.spawnStonePiece(piecePosition);
+        };
+
+        this.stoneDeposits.push(stoneDeposit);
     }
 
     /**
@@ -397,12 +859,20 @@ class Game {
      * Spawn a turret at the given position
      */
     spawnTurretAt(spawnPosition) {
+        const team = 'red'; // Player team
+        const enemyTeam = 'blue';
+
         const turret = new Turret(
             this.scene,
             spawnPosition,
             this.arena.getShadowGenerator(),
-            'red' // Player team
+            team
         );
+
+        // Wire up turret callbacks for enemy detection and effects
+        turret.setGetEnemyUnits(() => this.getEnemyUnits(enemyTeam));
+        turret.setAttackEffects(this.attackEffects);
+        turret.setSoundManager(soundManager);
 
         this.spawnedObjects.push(turret);
     }
@@ -411,14 +881,78 @@ class Game {
      * Spawn an armory at the given position
      */
     spawnArmoryAt(spawnPosition) {
+        const team = 'red'; // Player team
         const armory = new Armory(
             this.scene,
             spawnPosition,
             this.arena.getShadowGenerator(),
-            'red' // Player team
+            team
         );
 
+        // Wire up armory callbacks
+        armory.getCastle = () => this.getCastleByTeam(team);
+        armory.setOnClickCallback((clickedArmory) => {
+            this.openArmoryMenu(clickedArmory);
+        });
+
         this.spawnedObjects.push(armory);
+    }
+
+    /**
+     * Open armory menu for an armory building
+     */
+    openArmoryMenu(armory) {
+        const castle = armory.getCastle();
+        if (!castle) {
+            console.log('No castle found for armory');
+            return;
+        }
+
+        this.uiManager.showArmoryBuildMenu(armory, castle, (updatedArmory) => {
+            // Callback when sword is crafted - could trigger visual effects
+            console.log(`Armory now has ${updatedArmory.getSwordCount()} swords`);
+        });
+    }
+
+    /**
+     * Spawn a soldier bubby at the given position
+     */
+    spawnSoldierBubby(position, team) {
+        const enemyTeam = team === 'red' ? 'blue' : 'red';
+
+        const soldier = new SoldierBubby(this.scene, {
+            position: position,
+            team: team,
+            shadowGenerator: this.arena.getShadowGenerator(),
+            getAllBubbies: () => this.getAllBubbies(),
+            getEnemyUnits: () => this.getEnemyUnits(enemyTeam),
+            getEnemyBuildings: () => this.getEnemyBuildings(enemyTeam),
+            getEnemyCastle: () => this.getCastleByTeam(enemyTeam)
+        });
+
+        this.spawnedObjects.push(soldier);
+    }
+
+    /**
+     * Get all enemy units (bubbies of the specified team)
+     */
+    getEnemyUnits(team) {
+        return this.spawnedObjects.filter(obj => {
+            return (obj instanceof Bubby || obj instanceof AdultBubby || obj instanceof SoldierBubby)
+                && obj.isActive
+                && obj.team === team;
+        });
+    }
+
+    /**
+     * Get all enemy buildings (armories, turrets of the specified team)
+     */
+    getEnemyBuildings(team) {
+        return this.spawnedObjects.filter(obj => {
+            return (obj instanceof Armory || obj instanceof Turret)
+                && obj.isActive
+                && obj.team === team;
+        });
     }
 
     /**
@@ -456,6 +990,11 @@ class Game {
             this.cleanupInactiveObjects();
         }
 
+        // Update AI player
+        if (this.aiPlayer) {
+            this.aiPlayer.update(deltaTime);
+        }
+
         // Update all spawned objects
         this.spawnedObjects.forEach(obj => {
             if (obj && obj.isActive && obj.update) {
@@ -463,6 +1002,11 @@ class Game {
                 obj.updateWithDelta(deltaTime);
             }
         });
+
+        // Update attack visual effects
+        if (this.attackEffects) {
+            this.attackEffects.update();
+        }
     }
 
     /**
@@ -525,6 +1069,16 @@ class Game {
         // Dispose castles
         this.castles.forEach(castle => castle.dispose());
         this.castles = [];
+
+        // Dispose stone deposits
+        this.stoneDeposits.forEach(deposit => deposit.dispose());
+        this.stoneDeposits = [];
+
+        // Dispose AI player
+        if (this.aiPlayer) {
+            this.aiPlayer.dispose();
+            this.aiPlayer = null;
+        }
 
         // Dispose systems
         if (this.dragSystem) {

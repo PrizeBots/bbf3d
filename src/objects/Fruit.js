@@ -194,15 +194,17 @@ export class Fruit extends SpawnableObject {
 
         // Mark as being eaten
         this.isBeingEaten = true;
-        this.diedFromEating = true; // Track that if it dies, it's from being eaten
 
         // Calculate how much HP to give (up to the amount requested and available)
         const hpToGive = Math.min(hpAmount, this.getHealth());
 
+        // Only mark as died from eating if this bite will kill the fruit
+        if (this.getHealth() - hpToGive <= 0) {
+            this.diedFromEating = true;
+        }
+
         // Reduce fruit HP
         this.takeDamage(hpToGive);
-
-        // Scaling is handled by update methods for each state
 
         // Allow eating again next frame
         this.isBeingEaten = false;
@@ -239,7 +241,11 @@ export class Fruit extends SpawnableObject {
      * Dispose fruit and clean up
      */
     dispose() {
-        // updateObserver no longer used
+        // Notify parent tree if fruit is disposed while still attached
+        if (this.parentTree && this.parentTree.onFruitFell) {
+            this.parentTree.onFruitFell();
+            this.parentTree = null;
+        }
         super.dispose();
     }
 }

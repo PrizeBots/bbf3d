@@ -28,6 +28,22 @@ export class Tree extends SpawnableObject {
         this.maxFruitsOnTree = GameConstants.PLANT.TREE_MAX_FRUITS;
         this.fruitsOnTree = 0; // Current number of fruits on tree
 
+        // Tree lifespan
+        this.totalFruitsProduced = 0;
+        this.maxLifespanFruits = GameConstants.PLANT.TREE_LIFESPAN_FRUITS;
+        this.isDepleted = false;
+        this.foliageFallTimer = 0;
+        this.foliageFallDuration = GameConstants.PLANT.TREE_FOLIAGE_FALL_DURATION;
+        this.foliageFalling = false;
+        this.foliageFallPending = false; // Wait for last fruit to drop before falling
+        this.foliageStartPositions = []; // Store original positions for fall animation
+
+        // Dead tree harvesting (trunk only after foliage falls)
+        this.isTrunkHarvestable = false;
+        this.trunkHP = 20; // HP of trunk when harvestable
+        this.maxTrunkHP = 20;
+        this.onWoodChunkSpawnCallback = null; // Set by main.js
+
         this.create();
         // Shadows are enabled manually in create() for trunk and foliage
 
@@ -216,8 +232,14 @@ export class Tree extends SpawnableObject {
             }
         }
 
-        // Spawn fruits when fully mature
-        if (this.hasMatured && this.onFruitSpawnCallback) {
+        // Handle foliage falling animation when depleted
+        if (this.foliageFalling) {
+            this.updateFoliageFall(deltaTime);
+            return; // Skip other updates during fall animation
+        }
+
+        // Spawn fruits when fully mature (and not depleted)
+        if (this.hasMatured && this.onFruitSpawnCallback && !this.isDepleted) {
             this.fruitSpawnTimer += deltaTime;
 
             if (this.fruitSpawnTimer >= this.fruitSpawnInterval && this.fruitsOnTree < this.maxFruitsOnTree) {
@@ -282,6 +304,136 @@ export class Tree extends SpawnableObject {
         // Call spawn callback
         this.onFruitSpawnCallback(fruitPosition, this.team, this);
         this.fruitsOnTree++;
+        this.totalFruitsProduced++;
+
+        // Check if tree has reached its lifespan
+        if (this.totalFruitsProduced >= this.maxLifespanFruits) {
+            this.isDepleted = true;
+            this.foliageFallPending = true; // Wait for all fruits to fall first
+        }
+    }
+
+    /**
+     * Start the foliage falling animation
+     */
+    startFoliageFall() {
+        this.isDepleted = true;
+        this.foliageFalling = true;
+        this.foliageFallTimer = 0;
+
+        // Store original positions for animation
+        this.foliageStartPositions = this.foliage.map(sphere => ({
+            x: sphere.position.x,
+            y: sphere.position.y,
+            z: sphere.position.z
+        }));
+
+        // Enable transparency on foliage materials for fade out
+        this.foliage.forEach(sphere => {
+            if (sphere.material) {
+                sphere.material.transparencyMode = BABYLON.Material.MATERIAL_ALPHABLEND;
+            }
+        });
+
+        // Hide health bar
+        if (this.healthBar) {
+            this.healthBar.dispose();
+            this.healthBar = null;
+        }
+    }
+
+    /**
+     * Update foliage falling animation
+     */
+    updateFoliageFall(deltaTime) {
+        this.foliageFallTimer += deltaTime;
+        const progress = Math.min(this.foliageFallTimer / this.foliageFallDuration, 1);
+
+        // Ease out for natural falling motion
+        const easedProgress = 1 - Math.pow(1 - progress, 2);
+
+        // Update each foliage sphere
+        this.foliage.forEach((sphere, index) => {
+            if (!sphere) return;
+
+            const startPos = this.foliageStartPositions[index];
+            const fallDistance = startPos.y + 2; // Fall below ground level
+
+            // Fall down
+            sphere.position.y = startPos.y - (fallDistance * easedProgress);
+
+            // Spread outward slightly as they fall (using original positions)
+            const spreadAmount = easedProgress * 0.5;
+            sphere.position.x = startPos.x * (1 + spreadAmount);
+            sphere.position.z = startPos.z * (1 + spreadAmount);
+
+            // Fade out
+            if (sphere.material) {
+                sphere.material.alpha = 1 - easedProgress;
+            }
+
+            // Scale down slightly
+            const scale = 1 - (easedProgress * 0.3);
+            sphere.scaling = new BABYLON.Vector3(scale, scale, scale);
+        });
+
+        // Animation complete - dispose foliage
+        if (progress >= 1) {
+            this.foliageFalling = false;
+            this.disposeFoliage();
+        }
+    }
+
+    /**
+     * Dispose only the foliage, keeping the trunk
+     */
+    disposeFoliage() {
+        this.foliage.forEach(sphere => {
+            if (sphere) {
+                sphere.dispose();
+            }
+        });
+        this.foliage = [];
+        this.foliageStartPositions = [];
+
+        // Trunk is now harvestable
+        this.isTrunkHarvestable = true;
+    }
+
+    /**
+     * Check if trunk can be harvested (dead tree)
+     */
+    canBeHarvested() {
+        return this.isTrunkHarvestable && this.isActive && this.trunkHP > 0;
+    }
+
+    /**
+     * Take damage to the trunk (for harvesting wood)
+     * Returns true if wood chunk should be spawned
+     */
+    harvestTrunk(damage) {
+        if (!this.canBeHarvested()) {
+            return false;
+        }
+
+        this.trunkHP -= damage;
+
+        // Spawn a wood chunk
+        if (this.onWoodChunkSpawnCallback && this.mesh) {
+            const chunkPosition = this.mesh.position.clone();
+            // Offset slightly randomly from trunk
+            chunkPosition.x += (Math.random() - 0.5) * 2;
+            chunkPosition.z += (Math.random() - 0.5) * 2;
+            chunkPosition.y = 2; // Drop from mid-trunk height
+            this.onWoodChunkSpawnCallback(chunkPosition, this.team);
+        }
+
+        // Check if trunk is fully harvested
+        if (this.trunkHP <= 0) {
+            this.dispose();
+        }
+
+        return true;
     }
 
     /**
@@ -289,6 +441,12 @@ export class Tree extends SpawnableObject {
      */
     onFruitFell() {
         this.fruitsOnTree = Math.max(0, this.fruitsOnTree - 1);
+
+        // Start foliage fall after all fruits have dropped from depleted tree
+        if (this.foliageFallPending && this.fruitsOnTree === 0) {
+            this.foliageFallPending = false;
+            this.startFoliageFall();
+        }
     }
 
     /**

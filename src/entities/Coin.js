@@ -118,6 +118,13 @@ export class Coin {
     }
 
     /**
+     * Get animation duration
+     */
+    get animationDuration() {
+        return this.flightDuration;
+    }
+
+    /**
      * Update coin animation
      */
     update(deltaTime) {
@@ -199,7 +206,15 @@ export class Coin {
      * Dispose coin
      */
     dispose() {
+        if (this.particleSystem) {
+            this.particleSystem.stop();
+            this.particleSystem.dispose();
+            this.particleSystem = null;
+        }
         if (this.mesh) {
+            if (this.mesh.material) {
+                this.mesh.material.dispose();
+            }
             this.mesh.dispose();
             this.mesh = null;
         }

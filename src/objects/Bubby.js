@@ -27,6 +27,8 @@ export class Bubby extends SpawnableObject {
         this.getAllBubbies = config.getAllBubbies; // Function to get all other bubbies
         this.getAllFruits = config.getAllFruits || null; // Function to get all fruits in the scene
         this.onMatureCallback = config.onMatureCallback; // Callback when baby matures to adult
+        this.attackEffects = config.attackEffects || null; // Attack visual effects
+        this.soundManager = config.soundManager || null; // Sound manager
         this.idleTime = 0;
         this.squishPhase = 0;
 
@@ -316,6 +318,19 @@ export class Bubby extends SpawnableObject {
         if (this.target instanceof Fruit) {
             this.eatFruit();
             return;
+        }
+
+        // Get target position for effects
+        const targetPos = this.target.getPosition ? this.target.getPosition() :
+            (this.target.mesh ? this.target.mesh.position : this.mesh.position);
+
+        // Play attack animation and effects
+        if (this.attackEffects) {
+            this.attackEffects.createBounceAnimation(this);
+            this.attackEffects.createImpactEffect(targetPos, 'hit');
+        }
+        if (this.soundManager) {
+            this.soundManager.playEatSound();
         }
 
         const attackDamage = GameConstants.BABY_BUBBY.ATTACK_DAMAGE;

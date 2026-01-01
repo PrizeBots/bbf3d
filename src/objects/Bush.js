@@ -1,5 +1,6 @@
 import { SpawnableObject } from './SpawnableObject.js';
 import { GameConstants } from '../config/GameConstants.js';
+import { HealthBar } from '../components/HealthBar.js';
 
 /**
  * Bush - Mature plant that grows from sprout

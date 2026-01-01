@@ -10,6 +10,7 @@ export class CameraController {
         this.cameraSpeed = 0.3;
         this.onCameraMoveCallback = null;
         this.isFrozen = true; // Camera starts frozen
+        this.uiManager = null; // Reference to UIManager for mobile controls
 
         this.setupCamera();
         this.setupControls();
@@ -57,10 +58,12 @@ export class CameraController {
     }
 
     /**
-     * Update camera position based on input
+     * Update camera position based on input (keyboard and mobile UI)
      */
     update() {
         let moved = false;
+
+        // Keyboard controls
         if (this.keysPressed['a']) {
             this.camera.target.x -= this.cameraSpeed;
             moved = true;
@@ -70,10 +73,26 @@ export class CameraController {
             moved = true;
         }
 
+        // Mobile UI controls
+        if (this.uiManager) {
+            const panDir = this.uiManager.getPanDirection();
+            if (panDir !== 0) {
+                this.camera.target.x += panDir * this.cameraSpeed;
+                moved = true;
+            }
+        }
+
         // Notify callback if camera moved
         if (moved && this.onCameraMoveCallback) {
             this.onCameraMoveCallback(this.camera.target.x);
         }
+    }
+
+    /**
+     * Set reference to UIManager for mobile controls
+     */
+    setUIManager(uiManager) {
+        this.uiManager = uiManager;
     }
 
     /**
