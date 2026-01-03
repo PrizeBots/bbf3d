@@ -19,12 +19,15 @@ import { StoneDeposit } from './entities/StoneDeposit.js';
 import { SoldierBubby } from './objects/SoldierBubby.js';
 import { Turret } from './objects/Turret.js';
 import { Armory } from './objects/Armory.js';
+import { Factory } from './objects/Factory.js';
+import { Tank } from './objects/Tank.js';
 import { TargetingSystem } from './systems/TargetingSystem.js';
 import { DragSystem } from './systems/DragSystem.js';
 import { UIManager } from './ui/UIManager.js';
 import { PlayerCursor } from './ui/PlayerCursor.js';
 import { AIPlayer } from './systems/AIPlayer.js';
 import { AttackEffects } from './systems/AttackEffects.js';
+import { GrassSystem } from './systems/GrassSystem.js';
 import { soundManager } from './systems/SoundManager.js';
 
 /**
@@ -47,6 +50,7 @@ class Game {
         this.spawnedObjects = [];
         this.currentTargetType = null;
         this.attackEffects = null;
+        this.grassSystem = null;
 
         // Cleanup tracking
         this.updateFrameCount = 0;
@@ -67,6 +71,7 @@ class Game {
         // Initialize game components
         this.cameraController = new CameraController(this.scene, this.canvas);
         this.arena = new Arena(this.scene);
+        this.grassSystem = new GrassSystem(this.scene);
         this.setupCastles();
         this.uiManager = new UIManager(this.scene, this.canvas);
         this.attackEffects = new AttackEffects(this.scene);
@@ -137,6 +142,11 @@ class Game {
         // Register debug drop soldier callback
         this.uiManager.setOnDropSoldierCallback(() => {
             this.debugDropSoldier();
+        });
+
+        // Register debug give resources callback
+        this.uiManager.setOnGiveResourcesCallback(() => {
+            this.debugGiveResources();
         });
 
         // Setup castle click handlers for HQ menu
@@ -371,7 +381,7 @@ class Game {
      * Register spawn handlers for UI buttons
      */
     registerSpawnHandlers() {
-        const objectTypes = ["egg", "seed", "turret", "armory"];
+        const objectTypes = ["egg", "seed", "turret", "armory", "factory"];
 
         objectTypes.forEach(objectType => {
             // Desktop: click to enter placement mode
@@ -439,6 +449,9 @@ class Game {
             case "armory":
                 this.spawnArmoryAt(spawnPosition);
                 break;
+            case "factory":
+                this.spawnFactoryAt(spawnPosition);
+                break;
         }
 
         // Deactivate targeting and clear UI selection
@@ -478,6 +491,7 @@ class Game {
             getAllPlants: () => this.getAllPlants(),
             getAllBubbies: () => this.getAllBubbies(),
             getAllFruits: () => this.getAllFruits(),
+            getAllBuildings: () => this.getAllBuildings(),
             onMatureCallback: (pos, t, h) => this.spawnAdultBubby(pos, t, h),
             initialHealth: health,
             attackEffects: this.attackEffects,
@@ -505,6 +519,8 @@ class Game {
             getAllStonePieces: () => this.getAllStonePieces(),
             getAllStoneDeposits: () => this.getAllStoneDeposits(),
             getAllArmories: () => this.getAllArmories(team),
+            getAllTanks: () => this.getAllTanks(team),
+            getAllBuildings: () => this.getAllBuildings(),
             getEnemyUnits: () => this.getEnemyUnits(enemyTeam),
             getEnemyBuildings: () => this.getEnemyBuildings(enemyTeam),
             getEnemyCastle: () => this.getCastleByTeam(enemyTeam),
@@ -560,6 +576,18 @@ class Game {
     }
 
     /**
+     * Debug: Give 100 wood and 100 stone to player's castle
+     */
+    debugGiveResources() {
+        const playerCastle = this.getCastleByTeam('red');
+        if (playerCastle) {
+            playerCastle.addWood(100);
+            playerCastle.addStone(100);
+            console.log(`Debug: Added 100 wood and 100 stone. Total: ${playerCastle.getWoodCount()} wood, ${playerCastle.getStoneCount()} stone`);
+        }
+    }
+
+    /**
      * Get all active plants (sprouts, bushes, trees) in the game
      */
     getAllPlants() {
@@ -610,6 +638,48 @@ class Game {
     getAllArmories(team = null) {
         return this.spawnedObjects.filter(obj => {
             if (!(obj instanceof Armory) || !obj.isActive) return false;
+            if (team && obj.team !== team) return false;
+            return true;
+        });
+    }
+
+    /**
+     * Get all factories for a specific team
+     */
+    getAllFactories(team = null) {
+        return this.spawnedObjects.filter(obj => {
+            if (!(obj instanceof Factory) || !obj.isActive) return false;
+            if (team && obj.team !== team) return false;
+            return true;
+        });
+    }
+
+    /**
+     * Get all buildings (armories, turrets, factories, and castles)
+     * Used for bubby pathfinding to avoid walking through structures
+     */
+    getAllBuildings() {
+        const buildings = this.spawnedObjects.filter(obj => {
+            return (obj instanceof Armory || obj instanceof Turret || obj instanceof Factory)
+                && obj.isActive;
+        });
+
+        // Add castles
+        this.castles.forEach(castle => {
+            if (castle.isActive) {
+                buildings.push(castle);
+            }
+        });
+
+        return buildings;
+    }
+
+    /**
+     * Get all tanks for a specific team
+     */
+    getAllTanks(team = null) {
+        return this.spawnedObjects.filter(obj => {
+            if (!(obj instanceof Tank) || !obj.isActive) return false;
             if (team && obj.team !== team) return false;
             return true;
         });
@@ -915,6 +985,60 @@ class Game {
     }
 
     /**
+     * Spawn a factory at the given position
+     */
+    spawnFactoryAt(spawnPosition) {
+        const team = 'red'; // Player team
+        const factory = new Factory(
+            this.scene,
+            spawnPosition,
+            this.arena.getShadowGenerator(),
+            team
+        );
+
+        // Wire up factory callbacks
+        factory.setOnTankProduced((tank) => {
+            // Add tank to spawned objects
+            this.spawnedObjects.push(tank);
+
+            // Set up tank callbacks
+            const enemyTeam = team === 'red' ? 'blue' : 'red';
+            tank.setGetEnemyUnits(() => this.getEnemyUnits(enemyTeam));
+            tank.setGetEnemyBuildings(() => this.getEnemyBuildings(enemyTeam));
+            tank.setGetAllTanks(() => this.getAllTanks(team));
+            tank.setAttackEffects(this.attackEffects);
+            tank.setSoundManager(soundManager);
+
+            console.log(`Factory produced a tank for ${team} team!`);
+        });
+
+        factory.setSoundManager(soundManager);
+
+        // Make factory clickable to open build menu
+        factory.setOnClickCallback((clickedFactory) => {
+            this.openFactoryMenu(clickedFactory);
+        });
+
+        this.spawnedObjects.push(factory);
+    }
+
+    /**
+     * Open factory menu for a factory building
+     */
+    openFactoryMenu(factory) {
+        const castle = this.getCastleByTeam(factory.team);
+        if (!castle) {
+            console.log('No castle found for factory');
+            return;
+        }
+
+        this.uiManager.showFactoryBuildMenu(factory, castle, (updatedFactory) => {
+            // Callback when tank production is queued
+            console.log(`Factory queue: ${updatedFactory.getQueueLength()} items`);
+        });
+    }
+
+    /**
      * Spawn a soldier bubby at the given position
      */
     spawnSoldierBubby(position, team) {
@@ -945,11 +1069,11 @@ class Game {
     }
 
     /**
-     * Get all enemy buildings (armories, turrets of the specified team)
+     * Get all enemy buildings (armories, turrets, factories of the specified team)
      */
     getEnemyBuildings(team) {
         return this.spawnedObjects.filter(obj => {
-            return (obj instanceof Armory || obj instanceof Turret)
+            return (obj instanceof Armory || obj instanceof Turret || obj instanceof Factory || obj instanceof Tank)
                 && obj.isActive
                 && obj.team === team;
         });
@@ -993,6 +1117,18 @@ class Game {
         // Update AI player
         if (this.aiPlayer) {
             this.aiPlayer.update(deltaTime);
+        }
+
+        // Update castles (banner animations)
+        this.castles.forEach(castle => {
+            if (castle && castle.isActive && castle.update) {
+                castle.update(deltaTime);
+            }
+        });
+
+        // Update grass system (wind animation)
+        if (this.grassSystem) {
+            this.grassSystem.update(deltaTime);
         }
 
         // Update all spawned objects
@@ -1078,6 +1214,12 @@ class Game {
         if (this.aiPlayer) {
             this.aiPlayer.dispose();
             this.aiPlayer = null;
+        }
+
+        // Dispose grass system
+        if (this.grassSystem) {
+            this.grassSystem.dispose();
+            this.grassSystem = null;
         }
 
         // Dispose systems

@@ -42,9 +42,11 @@ export class AdultBubby extends SpawnableObject {
         this.getAllStonePieces = config.getAllStonePieces || null; // Function to get pickable stone pieces
         this.getAllStoneDeposits = config.getAllStoneDeposits || null; // Function to get mineable deposits
         this.getAllArmories = config.getAllArmories || null; // Function to get team's armories
+        this.getAllBuildings = config.getAllBuildings || null; // Function to get all buildings for avoidance
         this.getEnemyUnits = config.getEnemyUnits || null; // Function to get enemy units
         this.getEnemyBuildings = config.getEnemyBuildings || null; // Function to get enemy buildings
         this.getEnemyCastle = config.getEnemyCastle || null; // Function to get enemy castle
+        this.getAllTanks = config.getAllTanks || null; // Function to get available tanks
         this.onCoinEarnedCallback = config.onCoinEarnedCallback || null; // Callback when coin is earned (legacy)
         this.getCastle = config.getCastle || null; // Function to get team's castle
         this.attackEffects = config.attackEffects || null; // Attack visual effects
@@ -61,9 +63,14 @@ export class AdultBubby extends SpawnableObject {
         // 'gathering_fruit', 'carrying_fruit', 'returning_to_castle',
         // 'moving_to_tree', 'harvesting_tree', 'gathering_wood', 'carrying_wood',
         // 'moving_to_deposit', 'mining_deposit', 'gathering_stone', 'carrying_stone',
-        // 'moving_to_armory' (to become soldier), 'moving_to_armory_for_armor' (to get armor)
+        // 'moving_to_armory' (to become soldier), 'moving_to_armory_for_armor' (to get armor),
+        // 'moving_to_armory_for_helmet' (to get helmet)
         // 'stalking_enemy', 'attacking_enemy' (soldier combat)
+        // 'moving_to_tank', 'piloting_tank' (tank operation)
         this.state = 'idle';
+
+        // Tank piloting
+        this.pilotedTank = null; // Reference to tank being piloted
 
         // Soldier status - when equipped with sword from armory
         this.isSoldier = false;
@@ -79,6 +86,10 @@ export class AdultBubby extends SpawnableObject {
         // Equipment - armor gives defense bonus
         this.hasArmor = false; // Whether bubby has armor equipped
         this.armorMesh = null; // Visual armor mesh attached to bubby
+
+        // Equipment - helmet gives defense bonus
+        this.hasHelmet = false; // Whether bubby has helmet equipped
+        this.helmetMesh = null; // Visual helmet mesh attached to bubby
 
         // Wandering behavior
         this.wanderTarget = null;
@@ -249,47 +260,137 @@ export class AdultBubby extends SpawnableObject {
         this.isSwingingArms = false;
         this.armSwingPhase = 0;
         // Reset arms to rest position
-        if (this.leftArmPivot) this.leftArmPivot.rotation.z = Math.PI / 6;
-        if (this.rightArmPivot) this.rightArmPivot.rotation.z = -Math.PI / 6;
+        if (this.leftArmPivot) {
+            this.leftArmPivot.rotation.z = Math.PI / 6; // Slight outward angle
+            this.leftArmPivot.rotation.x = 0; // Arms down
+        }
+        if (this.rightArmPivot) {
+            this.rightArmPivot.rotation.z = -Math.PI / 6; // Slight outward angle
+            this.rightArmPivot.rotation.x = 0; // Arms down
+            this.rightArmPivot.rotation.y = 0; // Reset any Y rotation
+        }
     }
 
     /**
-     * Update arm swing animation
+     * Update arm swing animation - different animations for sword vs unarmed
      */
     updateArmSwing(deltaTime) {
         if (!this.isSwingingArms || !this.leftArmPivot || !this.rightArmPivot) return;
 
         this.armSwingPhase += this.armSwingSpeed * deltaTime;
 
-        // Animation phases:
-        // 0.0 - 0.3: Wind up (arms go to 9 o'clock position)
-        // 0.3 - 0.4: Pause at top
-        // 0.4 - 0.7: Swing down (attack)
-        // 0.7 - 1.0: Brief pause before next swing
+        // Use sword slash animation if equipped, otherwise use punch animation
+        if (this.isSoldier || this.equippedSword) {
+            this.updateSwordSlashAnimation();
+        } else {
+            this.updatePunchAnimation();
+        }
+    }
 
-        let leftAngle, rightAngle;
-        const restAngle = Math.PI / 6; // Arms slightly out
-        const windUpAngle = Math.PI / 2; // 9 o'clock (horizontal)
-        const swingDownAngle = -Math.PI / 4; // Past vertical
+    /**
+     * Sword slash animation - diagonal overhead slash with the right arm
+     */
+    updateSwordSlashAnimation() {
+        // Animation phases:
+        // 0.0 - 0.25: Wind up (sword raised high and back)
+        // 0.25 - 0.35: Pause at top
+        // 0.35 - 0.55: Slash down diagonally - the strike!
+        // 0.55 - 1.0: Return to rest
+
+        // Rest position values
+        const restX = 0;
+        const restZ = -Math.PI / 6; // Slight outward angle
+
+        // Wind up position - sword raised high behind head
+        const windUpX = -Math.PI / 2.5;  // Arm back
+        const windUpZ = -Math.PI / 3;    // Arm raised up and out
+
+        // Slash end position - sword swung down and across
+        const slashX = Math.PI / 3;      // Arm forward and down
+        const slashZ = Math.PI / 6;      // Arm comes across body
+
+        let rightArmX, rightArmZ;
+        let leftArmX = 0; // Left arm stays mostly still
+
+        if (this.armSwingPhase < 0.25) {
+            // Wind up phase - raise sword high
+            const t = this.armSwingPhase / 0.25;
+            const eased = t * t; // Ease in (slow start)
+            rightArmX = restX + (windUpX - restX) * eased;
+            rightArmZ = restZ + (windUpZ - restZ) * eased;
+            // Left arm goes slightly back
+            leftArmX = -0.3 * eased;
+        } else if (this.armSwingPhase < 0.35) {
+            // Brief pause at top of swing
+            rightArmX = windUpX;
+            rightArmZ = windUpZ;
+            leftArmX = -0.3;
+        } else if (this.armSwingPhase < 0.55) {
+            // Slash! Fast diagonal swing
+            const t = (this.armSwingPhase - 0.35) / 0.2;
+            // Ease out cubic for fast, powerful slash
+            const eased = 1 - Math.pow(1 - t, 3);
+            rightArmX = windUpX + (slashX - windUpX) * eased;
+            rightArmZ = windUpZ + (slashZ - windUpZ) * eased;
+            leftArmX = -0.3;
+
+            // Trigger callback at impact (middle of slash)
+            if (t >= 0.4 && t < 0.6 && this.armSwingCallback) {
+                this.armSwingCallback();
+                this.armSwingCallback = null;
+            }
+        } else if (this.armSwingPhase < 1.0) {
+            // Return to rest - slower recovery
+            const t = (this.armSwingPhase - 0.55) / 0.45;
+            const eased = t; // Linear return
+            rightArmX = slashX + (restX - slashX) * eased;
+            rightArmZ = slashZ + (restZ - slashZ) * eased;
+            leftArmX = -0.3 * (1 - eased);
+        } else {
+            // Reset for next cycle
+            this.armSwingPhase = 0;
+            rightArmX = restX;
+            rightArmZ = restZ;
+            leftArmX = 0;
+        }
+
+        // Apply rotations
+        this.rightArmPivot.rotation.x = rightArmX;
+        this.rightArmPivot.rotation.z = rightArmZ;
+        this.leftArmPivot.rotation.x = leftArmX;
+        this.leftArmPivot.rotation.z = Math.PI / 6; // Keep slight outward angle
+    }
+
+    /**
+     * Punch animation - both arms swing forward (original animation)
+     */
+    updatePunchAnimation() {
+        // Animation phases:
+        // 0.0 - 0.3: Wind up (arms go back behind body)
+        // 0.3 - 0.4: Pause at back
+        // 0.4 - 0.7: Swing forward (attack) - this is the strike
+        // 0.7 - 1.0: Return to rest
+
+        let swingAngle; // Rotation around X axis (forward/backward)
+        const restAngle = 0; // Arms hanging down
+        const windUpAngle = -Math.PI / 3; // Arms back (negative = behind)
+        const swingForwardAngle = Math.PI / 2.5; // Arms forward (positive = in front)
 
         if (this.armSwingPhase < 0.3) {
-            // Wind up phase
+            // Wind up phase - arms go back
             const t = this.armSwingPhase / 0.3;
             const eased = t * t; // Ease in
-            leftAngle = restAngle + (windUpAngle - restAngle) * eased;
-            rightAngle = -restAngle + (-windUpAngle + restAngle) * eased;
+            swingAngle = restAngle + (windUpAngle - restAngle) * eased;
         } else if (this.armSwingPhase < 0.4) {
-            // Pause at top
-            leftAngle = windUpAngle;
-            rightAngle = -windUpAngle;
+            // Pause at back
+            swingAngle = windUpAngle;
         } else if (this.armSwingPhase < 0.7) {
-            // Swing down
+            // Swing forward - the attack!
             const t = (this.armSwingPhase - 0.4) / 0.3;
             const eased = 1 - (1 - t) * (1 - t); // Ease out (accelerate)
-            leftAngle = windUpAngle + (swingDownAngle - windUpAngle) * eased;
-            rightAngle = -windUpAngle + (-swingDownAngle + windUpAngle) * eased;
+            swingAngle = windUpAngle + (swingForwardAngle - windUpAngle) * eased;
 
-            // Trigger callback at impact (t = 0.5 of swing)
+            // Trigger callback at impact (when arms are forward)
             if (t >= 0.5 && t < 0.6 && this.armSwingCallback) {
                 this.armSwingCallback();
                 this.armSwingCallback = null; // Only call once per swing
@@ -297,17 +398,16 @@ export class AdultBubby extends SpawnableObject {
         } else if (this.armSwingPhase < 1.0) {
             // Return to rest
             const t = (this.armSwingPhase - 0.7) / 0.3;
-            leftAngle = swingDownAngle + (restAngle - swingDownAngle) * t;
-            rightAngle = -swingDownAngle + (-restAngle + swingDownAngle) * t;
+            swingAngle = swingForwardAngle + (restAngle - swingForwardAngle) * t;
         } else {
             // Reset for next cycle
             this.armSwingPhase = 0;
-            leftAngle = restAngle;
-            rightAngle = -restAngle;
+            swingAngle = restAngle;
         }
 
-        this.leftArmPivot.rotation.z = leftAngle;
-        this.rightArmPivot.rotation.z = rightAngle;
+        // Apply forward/backward swing (rotation.x) while keeping slight outward angle (rotation.z)
+        this.leftArmPivot.rotation.x = swingAngle;
+        this.rightArmPivot.rotation.x = swingAngle;
     }
 
     /**
@@ -426,12 +526,23 @@ export class AdultBubby extends SpawnableObject {
             case 'moving_to_armory_for_armor':
                 this.updateMovingToArmoryForArmor();
                 break;
+            // Helmet equipping
+            case 'moving_to_armory_for_helmet':
+                this.updateMovingToArmoryForHelmet();
+                break;
             // Soldier combat
             case 'stalking_enemy':
                 this.updateStalkingEnemy(deltaTime);
                 break;
             case 'attacking_enemy':
                 this.updateAttackingEnemy(deltaTime);
+                break;
+            // Tank operation
+            case 'moving_to_tank':
+                this.updateMovingToTank();
+                break;
+            case 'piloting_tank':
+                this.updatePilotingTank(deltaTime);
                 break;
         }
 
@@ -472,6 +583,16 @@ export class AdultBubby extends SpawnableObject {
 
                 // Bob up and down slightly
                 this.head.position.y = 2.925 + Math.sin(this.bobPhase) * 0.05;
+
+                // Keep helmet solid by counteracting head squish
+                if (this.helmetMesh) {
+                    // Apply inverse scaling to cancel out head's squish
+                    this.helmetMesh.scaling = new BABYLON.Vector3(
+                        headSquish,      // Inverse of head's X scale
+                        1 / headSquish,  // Inverse of head's Y scale
+                        headSquish       // Inverse of head's Z scale
+                    );
+                }
             }
 
             // Gentle rocking motion
@@ -490,7 +611,23 @@ export class AdultBubby extends SpawnableObject {
      * Cooperative behavior: some bubbies prefer harvesting while others prefer collecting
      */
     updateIdle() {
-        // Priority 0: Soldiers detect and attack enemies
+        // Priority 0: If piloting a tank, stay in tank mode
+        if (this.pilotedTank && this.pilotedTank.isActive) {
+            this.state = 'piloting_tank';
+            return;
+        }
+
+        // Priority 0.5: Soldiers seek available tanks (all bubbies want to be tank drivers!)
+        if (this.getAllTanks) {
+            const availableTank = this.findNearestAvailableTank();
+            if (availableTank) {
+                this.target = availableTank;
+                this.state = 'moving_to_tank';
+                return;
+            }
+        }
+
+        // Priority 1: Soldiers detect and attack enemies
         if (this.isSoldier) {
             const enemy = this.findNearestEnemy();
             if (enemy) {
@@ -500,7 +637,7 @@ export class AdultBubby extends SpawnableObject {
             }
         }
 
-        // Priority 1: Only hunt if not at full HP (adult bubbies only eat to heal)
+        // Priority 2: Only hunt if not at full HP (adult bubbies only eat to heal)
         if (this.getHealth() < this.maxHealth) {
             // Prioritize fruits over plants for healing
             const nearestFruit = this.findNearestFruitForEating();
@@ -535,6 +672,16 @@ export class AdultBubby extends SpawnableObject {
             if (armoryWithArmor) {
                 this.target = armoryWithArmor;
                 this.state = 'moving_to_armory_for_armor';
+                return;
+            }
+        }
+
+        // Priority 1.7: Get helmet if not already wearing it
+        if (!this.hasHelmet && this.getAllArmories) {
+            const armoryWithHelmet = this.findArmoryWithHelmet();
+            if (armoryWithHelmet) {
+                this.target = armoryWithHelmet;
+                this.state = 'moving_to_armory_for_helmet';
                 return;
             }
         }
@@ -674,6 +821,17 @@ export class AdultBubby extends SpawnableObject {
             }
         }
 
+        // Priority 1.7: Get helmet if not already wearing it
+        if (!this.hasHelmet && this.getAllArmories) {
+            const armoryWithHelmet = this.findArmoryWithHelmet();
+            if (armoryWithHelmet) {
+                this.target = armoryWithHelmet;
+                this.state = 'moving_to_armory_for_helmet';
+                this.wanderTarget = null;
+                return;
+            }
+        }
+
         // Priority 2: Gather fruit for coins
         if (this.getHealth() >= this.maxHealth && GameConstants.ADULT_BUBBY.GATHER_FRUIT) {
             const nearestFruitToGather = this.findNearestFruitForGathering();
@@ -739,7 +897,7 @@ export class AdultBubby extends SpawnableObject {
 
         // Move toward wander target
         if (this.wanderTarget) {
-            const distance = this.ai.moveToward(this.wanderTarget, this.getAllBubbies, 0.4);
+            const distance = this.ai.moveToward(this.wanderTarget, this.getAllBubbies, 0.4, this.getAllBuildings);
 
             if (distance < 2) {
                 this.state = 'idle';
@@ -772,7 +930,7 @@ export class AdultBubby extends SpawnableObject {
         }
 
         // Move toward target with collision avoidance
-        this.ai.moveToward(this.target.mesh.position, this.getAllBubbies, 0.5);
+        this.ai.moveToward(this.target.mesh.position, this.getAllBubbies, 0.5, this.getAllBuildings);
     }
 
     /**
@@ -784,6 +942,12 @@ export class AdultBubby extends SpawnableObject {
             this.state = 'idle';
             this.stopArmSwing();
             return;
+        }
+
+        // Face the target while attacking
+        const targetPos = this.ai.getTargetPosition(this.target);
+        if (targetPos) {
+            this.ai.faceTarget(targetPos);
         }
 
         // Start arm swing if not already swinging
@@ -916,7 +1080,7 @@ export class AdultBubby extends SpawnableObject {
         }
 
         // Move toward fruit with collision avoidance
-        this.ai.moveToward(this.target.mesh.position, this.getAllBubbies, 0.5);
+        this.ai.moveToward(this.target.mesh.position, this.getAllBubbies, 0.5, this.getAllBuildings);
     }
 
     /**
@@ -952,7 +1116,7 @@ export class AdultBubby extends SpawnableObject {
 
         // Get castle position for this team
         const castlePos = this.getCastlePosition();
-        const distance = this.ai.moveToward(castlePos, this.getAllBubbies, 0.5);
+        const distance = this.ai.moveToward(castlePos, this.getAllBubbies, 0.5, this.getAllBuildings);
 
         // Check if in deposit range
         if (distance <= GameConstants.ADULT_BUBBY.DEPOSIT_RANGE) {
@@ -1062,7 +1226,7 @@ export class AdultBubby extends SpawnableObject {
         }
 
         // Move toward tree
-        this.ai.moveToward(this.target.mesh.position, this.getAllBubbies, 0.5);
+        this.ai.moveToward(this.target.mesh.position, this.getAllBubbies, 0.5, this.getAllBuildings);
     }
 
     /**
@@ -1074,6 +1238,12 @@ export class AdultBubby extends SpawnableObject {
             this.state = 'idle';
             this.stopArmSwing();
             return;
+        }
+
+        // Face the tree while harvesting
+        const treePos = this.ai.getTargetPosition(this.target);
+        if (treePos) {
+            this.ai.faceTarget(treePos);
         }
 
         // If target moved out of range, chase it
@@ -1144,7 +1314,7 @@ export class AdultBubby extends SpawnableObject {
         }
 
         // Move toward wood chunk
-        this.ai.moveToward(this.target.mesh.position, this.getAllBubbies, 0.5);
+        this.ai.moveToward(this.target.mesh.position, this.getAllBubbies, 0.5, this.getAllBuildings);
     }
 
     // ==========================================
@@ -1190,7 +1360,7 @@ export class AdultBubby extends SpawnableObject {
         }
 
         // Move toward deposit
-        this.ai.moveToward(this.target.getPosition(), this.getAllBubbies, 0.5);
+        this.ai.moveToward(this.target.getPosition(), this.getAllBubbies, 0.5, this.getAllBuildings);
     }
 
     /**
@@ -1202,6 +1372,12 @@ export class AdultBubby extends SpawnableObject {
             this.state = 'idle';
             this.stopArmSwing();
             return;
+        }
+
+        // Face the deposit while mining
+        const depositPos = this.ai.getTargetPosition(this.target);
+        if (depositPos) {
+            this.ai.faceTarget(depositPos);
         }
 
         // If target moved out of range, chase it
@@ -1272,7 +1448,7 @@ export class AdultBubby extends SpawnableObject {
         }
 
         // Move toward stone piece
-        this.ai.moveToward(this.target.mesh.position, this.getAllBubbies, 0.5);
+        this.ai.moveToward(this.target.mesh.position, this.getAllBubbies, 0.5, this.getAllBuildings);
     }
 
     // ==========================================
@@ -1331,7 +1507,7 @@ export class AdultBubby extends SpawnableObject {
         }
 
         // Move toward armory
-        this.ai.moveToward(this.target.getPosition(), this.getAllBubbies, 0.5);
+        this.ai.moveToward(this.target.getPosition(), this.getAllBubbies, 0.5, this.getAllBuildings);
     }
 
     /**
@@ -1353,7 +1529,7 @@ export class AdultBubby extends SpawnableObject {
         }
 
         // Move toward armory
-        this.ai.moveToward(this.target.getPosition(), this.getAllBubbies, 0.5);
+        this.ai.moveToward(this.target.getPosition(), this.getAllBubbies, 0.5, this.getAllBuildings);
     }
 
     /**
@@ -1494,6 +1670,51 @@ export class AdultBubby extends SpawnableObject {
     }
 
     /**
+     * Get max health
+     */
+    getMaxHealth() {
+        return this.maxHealth;
+    }
+
+    /**
+     * Get move speed
+     */
+    getMoveSpeed() {
+        return GameConstants.ADULT_BUBBY.MOVE_SPEED;
+    }
+
+    /**
+     * Get sensing range
+     */
+    getSensingRange() {
+        return GameConstants.ADULT_BUBBY.SENSING_RANGE;
+    }
+
+    /**
+     * Get defense (base defense + armor bonus + helmet bonus)
+     * Returns damage reduction as a decimal (0 = no reduction, 0.3 = 30% reduction)
+     */
+    getDefense() {
+        // Start with base defense (soldiers have innate defense from training)
+        let defense = this.isSoldier
+            ? GameConstants.SOLDIER_BUBBY.BASE_DEFENSE
+            : GameConstants.ADULT_BUBBY.BASE_DEFENSE;
+
+        // Add armor defense bonus (stacks with base)
+        if (this.hasArmor) {
+            defense += GameConstants.ARMOR.DAMAGE_REDUCTION;
+        }
+
+        // Add helmet defense bonus (stacks with armor)
+        if (this.hasHelmet) {
+            defense += GameConstants.HELMET.DAMAGE_REDUCTION;
+        }
+
+        // Cap defense at 90% to prevent invincibility
+        return Math.min(defense, 0.9);
+    }
+
+    /**
      * Find nearest armory with armor available
      */
     findArmoryWithArmor() {
@@ -1549,29 +1770,30 @@ export class AdultBubby extends SpawnableObject {
         }
 
         // Create armor vest around the body
+        // Body capsule has radius 0.6 (diameter 1.2), so armor must be larger to be visible
         const armorRoot = new BABYLON.TransformNode(`bubby_armor_${Date.now()}`, this.scene);
         armorRoot.parent = this.body;
-        armorRoot.position.y = 0.1; // Centered on body
+        armorRoot.position.y = 0; // Centered on body
 
-        // Metal vest (slightly larger than body to wrap around it)
+        // Metal vest - must be larger than body diameter (1.2) to wrap around it visibly
         const vest = BABYLON.MeshBuilder.CreateBox(
             `bubby_armor_vest_${Date.now()}`,
-            { width: 0.8, height: 1.0, depth: 0.75 },
+            { width: 1.4, height: 1.2, depth: 1.4 },
             this.scene
         );
         vest.parent = armorRoot;
         vest.position.y = 0;
 
         const vestMat = new BABYLON.StandardMaterial(`bubby_armor_vest_mat_${Date.now()}`, this.scene);
-        vestMat.diffuseColor = new BABYLON.Color3(0.5, 0.5, 0.55);
-        vestMat.specularColor = new BABYLON.Color3(0.6, 0.6, 0.65);
+        vestMat.diffuseColor = new BABYLON.Color3(0.45, 0.45, 0.5);
+        vestMat.specularColor = new BABYLON.Color3(0.7, 0.7, 0.75);
         vestMat.specularPower = 32;
         vest.material = vestMat;
 
-        // Team-colored trim
+        // Team-colored trim stripe down the front
         const trim = BABYLON.MeshBuilder.CreateBox(
             `bubby_armor_trim_${Date.now()}`,
-            { width: 0.15, height: 0.9, depth: 0.8 },
+            { width: 0.2, height: 1.1, depth: 1.5 },
             this.scene
         );
         trim.parent = armorRoot;
@@ -1579,29 +1801,32 @@ export class AdultBubby extends SpawnableObject {
 
         const trimMat = new BABYLON.StandardMaterial(`bubby_armor_trim_mat_${Date.now()}`, this.scene);
         trimMat.diffuseColor = this.team === 'red'
-            ? new BABYLON.Color3(0.6, 0.2, 0.15)
-            : new BABYLON.Color3(0.15, 0.2, 0.6);
+            ? new BABYLON.Color3(0.7, 0.15, 0.1)
+            : new BABYLON.Color3(0.1, 0.15, 0.7);
+        trimMat.emissiveColor = this.team === 'red'
+            ? new BABYLON.Color3(0.2, 0.05, 0.02)
+            : new BABYLON.Color3(0.02, 0.05, 0.2);
         trim.material = trimMat;
 
-        // Shoulder pads
+        // Shoulder pads - larger and more visible
         const leftPad = BABYLON.MeshBuilder.CreateBox(
             `bubby_armor_left_pad_${Date.now()}`,
-            { width: 0.35, height: 0.15, depth: 0.3 },
+            { width: 0.5, height: 0.2, depth: 0.5 },
             this.scene
         );
         leftPad.parent = armorRoot;
-        leftPad.position = new BABYLON.Vector3(-0.5, 0.45, 0);
-        leftPad.rotation.z = 0.25;
+        leftPad.position = new BABYLON.Vector3(-0.7, 0.55, 0);
+        leftPad.rotation.z = 0.3;
         leftPad.material = vestMat;
 
         const rightPad = BABYLON.MeshBuilder.CreateBox(
             `bubby_armor_right_pad_${Date.now()}`,
-            { width: 0.35, height: 0.15, depth: 0.3 },
+            { width: 0.5, height: 0.2, depth: 0.5 },
             this.scene
         );
         rightPad.parent = armorRoot;
-        rightPad.position = new BABYLON.Vector3(0.5, 0.45, 0);
-        rightPad.rotation.z = -0.25;
+        rightPad.position = new BABYLON.Vector3(0.7, 0.55, 0);
+        rightPad.rotation.z = -0.3;
         rightPad.material = vestMat;
 
         this.armorMesh = armorRoot;
@@ -1623,15 +1848,160 @@ export class AdultBubby extends SpawnableObject {
     }
 
     /**
-     * Override takeDamage to apply armor damage reduction
+     * Find nearest armory with helmet available
+     */
+    findArmoryWithHelmet() {
+        if (!this.getAllArmories) return null;
+
+        const armories = this.getAllArmories();
+        let nearest = null;
+        let nearestDist = Infinity;
+
+        for (const armory of armories) {
+            if (!armory.isActive || !armory.hasHelmet()) continue;
+
+            const dist = this.ai.getDistanceTo(armory);
+            if (dist < nearestDist && dist <= GameConstants.ADULT_BUBBY.SENSING_RANGE) {
+                nearestDist = dist;
+                nearest = armory;
+            }
+        }
+
+        return nearest;
+    }
+
+    /**
+     * Update moving to armory for helmet state
+     */
+    updateMovingToArmoryForHelmet() {
+        if (!this.target || !this.target.isActive || !this.target.hasHelmet()) {
+            this.target = null;
+            this.state = 'idle';
+            return;
+        }
+
+        const distance = this.ai.getDistanceTo(this.target);
+
+        // Check if close enough to armory
+        if (distance <= GameConstants.ADULT_BUBBY.PICKUP_RANGE) {
+            this.equipHelmet(this.target);
+            return;
+        }
+
+        // Move toward armory
+        this.ai.moveToward(this.target.getPosition(), this.getAllBubbies, 0.5, this.getAllBuildings);
+    }
+
+    /**
+     * Equip helmet from an armory
+     */
+    equipHelmet(armory) {
+        if (!armory || !armory.hasHelmet()) {
+            this.target = null;
+            this.state = 'idle';
+            return;
+        }
+
+        // Take helmet from armory
+        if (armory.takeHelmet()) {
+            this.hasHelmet = true;
+
+            // Create visual helmet on bubby
+            this.createHelmetVisual();
+
+            console.log(`Bubby equipped helmet!`);
+        }
+
+        this.target = null;
+        this.state = 'idle';
+    }
+
+    /**
+     * Create visual helmet mesh attached to the bubby's head
+     */
+    createHelmetVisual() {
+        if (this.helmetMesh) {
+            this.helmetMesh.dispose();
+        }
+
+        // Create helmet on top of head
+        // Head is a sphere with diameter 2.25, positioned at y = 2.925 relative to mesh
+        const helmetRoot = new BABYLON.TransformNode(`bubby_helmet_${Date.now()}`, this.scene);
+        helmetRoot.parent = this.head;
+        helmetRoot.position.y = 0.3; // Slightly above head center
+
+        // Helmet dome (covers top of head)
+        const dome = BABYLON.MeshBuilder.CreateSphere(
+            `bubby_helmet_dome_${Date.now()}`,
+            { diameter: 2.5, segments: 12 },
+            this.scene
+        );
+        dome.parent = helmetRoot;
+        dome.position.y = 0.2;
+        dome.scaling = new BABYLON.Vector3(1, 0.7, 1); // Flattened dome shape
+
+        const domeMat = new BABYLON.StandardMaterial(`bubby_helmet_dome_mat_${Date.now()}`, this.scene);
+        domeMat.diffuseColor = new BABYLON.Color3(0.5, 0.5, 0.55);
+        domeMat.specularColor = new BABYLON.Color3(0.8, 0.8, 0.85);
+        domeMat.specularPower = 48;
+        dome.material = domeMat;
+
+        // Helmet brim/visor
+        const brim = BABYLON.MeshBuilder.CreateBox(
+            `bubby_helmet_brim_${Date.now()}`,
+            { width: 2.6, height: 0.2, depth: 1.2 },
+            this.scene
+        );
+        brim.parent = helmetRoot;
+        brim.position = new BABYLON.Vector3(0, -0.3, 0.6);
+        brim.rotation.x = -0.15;
+        brim.material = domeMat;
+
+        // Team-colored crest on top
+        const crest = BABYLON.MeshBuilder.CreateBox(
+            `bubby_helmet_crest_${Date.now()}`,
+            { width: 0.15, height: 0.5, depth: 1.5 },
+            this.scene
+        );
+        crest.parent = helmetRoot;
+        crest.position.y = 0.65;
+
+        const crestMat = new BABYLON.StandardMaterial(`bubby_helmet_crest_mat_${Date.now()}`, this.scene);
+        crestMat.diffuseColor = this.team === 'red'
+            ? new BABYLON.Color3(0.8, 0.15, 0.1)
+            : new BABYLON.Color3(0.1, 0.15, 0.8);
+        crestMat.emissiveColor = this.team === 'red'
+            ? new BABYLON.Color3(0.25, 0.05, 0.02)
+            : new BABYLON.Color3(0.02, 0.05, 0.25);
+        crest.material = crestMat;
+
+        this.helmetMesh = helmetRoot;
+
+        // Add to shadow casters
+        if (this.shadowGenerator) {
+            this.shadowGenerator.addShadowCaster(dome);
+            this.shadowGenerator.addShadowCaster(brim);
+            this.shadowGenerator.addShadowCaster(crest);
+        }
+    }
+
+    /**
+     * Check if bubby has helmet equipped
+     */
+    isHelmeted() {
+        return this.hasHelmet;
+    }
+
+    /**
+     * Override takeDamage to apply defense (base + armor)
      */
     takeDamage(amount) {
         let finalDamage = amount;
 
-        // Apply armor damage reduction
-        if (this.hasArmor) {
-            const reduction = GameConstants.ARMOR.DAMAGE_REDUCTION;
-            finalDamage = amount * (1 - reduction);
+        // Apply total defense damage reduction
+        const defense = this.getDefense();
+        if (defense > 0) {
+            finalDamage = amount * (1 - defense);
         }
 
         // Call parent takeDamage with reduced amount
@@ -1730,7 +2100,7 @@ export class AdultBubby extends SpawnableObject {
             return;
         }
 
-        this.ai.moveToward(targetPos, this.getAllBubbies, 0.5);
+        this.ai.moveToward(targetPos, this.getAllBubbies, 0.5, this.getAllBuildings);
     }
 
     /**
@@ -1743,6 +2113,12 @@ export class AdultBubby extends SpawnableObject {
             this.state = 'idle';
             this.stopArmSwing();
             return;
+        }
+
+        // Face the enemy while attacking
+        const enemyPos = this.ai.getTargetPosition(this.combatTarget);
+        if (enemyPos) {
+            this.ai.faceTarget(enemyPos);
         }
 
         const distance = this.ai.getDistanceTo(this.combatTarget);
@@ -1865,7 +2241,7 @@ export class AdultBubby extends SpawnableObject {
 
         // Get castle position for this team
         const castlePos = this.getCastlePosition();
-        const distance = this.ai.moveToward(castlePos, this.getAllBubbies, 0.5);
+        const distance = this.ai.moveToward(castlePos, this.getAllBubbies, 0.5, this.getAllBuildings);
 
         // Check if in deposit range
         if (distance <= GameConstants.ADULT_BUBBY.DEPOSIT_RANGE) {
@@ -2090,6 +2466,16 @@ export class AdultBubby extends SpawnableObject {
                 }
                 break;
 
+            case 'helmet':
+                // Dropped on armory - equip helmet immediately if available
+                if (!this.hasHelmet && target.hasHelmet && target.hasHelmet()) {
+                    this.equipHelmet(target);
+                } else {
+                    this.state = 'idle';
+                    this.target = null;
+                }
+                break;
+
             case 'attack':
                 // Dropped on enemy unit - target for attack
                 if (target.isActive && target.team !== this.team) {
@@ -2118,10 +2504,132 @@ export class AdultBubby extends SpawnableObject {
         }
     }
 
+    // ==========================================
+    // TANK OPERATION
+    // ==========================================
+
+    /**
+     * Find the nearest available tank (not piloted, same team)
+     */
+    findNearestAvailableTank() {
+        if (!this.getAllTanks) return null;
+
+        const tanks = this.getAllTanks();
+        let nearest = null;
+        let nearestDist = GameConstants.ADULT_BUBBY.SENSING_RANGE * 2; // Extended range for tanks
+
+        for (const tank of tanks) {
+            if (!tank.isActive) continue;
+            if (tank.team !== this.team) continue;
+            if (!tank.needsPilot()) continue; // Already has a pilot
+
+            const dist = this.ai.getDistanceTo(tank);
+            if (dist < nearestDist) {
+                nearestDist = dist;
+                nearest = tank;
+            }
+        }
+
+        return nearest;
+    }
+
+    /**
+     * Update moving to tank state
+     */
+    updateMovingToTank() {
+        // Verify target is still valid
+        if (!this.target || !this.target.isActive || !this.target.needsPilot()) {
+            this.target = null;
+            this.state = 'idle';
+            return;
+        }
+
+        const targetPos = this.ai.getTargetPosition(this.target);
+        if (!targetPos) {
+            this.state = 'idle';
+            return;
+        }
+
+        const distance = this.ai.moveToward(targetPos, this.getAllBubbies, 0.3, this.getAllBuildings);
+
+        // Close enough to enter?
+        if (distance <= GameConstants.ADULT_BUBBY.PICKUP_RANGE) {
+            // Enter the tank!
+            if (this.target.enterTank(this)) {
+                this.pilotedTank = this.target;
+                this.target = null;
+                this.state = 'piloting_tank';
+
+                // Set up tank callbacks
+                this.pilotedTank.setGetEnemyUnits(this.getEnemyUnits);
+                this.pilotedTank.setGetEnemyBuildings(this.getEnemyBuildings);
+                this.pilotedTank.setAttackEffects(this.attackEffects);
+                this.pilotedTank.setSoundManager(this.soundManager);
+
+                console.log(`${this.team} bubby entered a tank!`);
+            } else {
+                // Tank was taken by another bubby
+                this.target = null;
+                this.state = 'idle';
+            }
+        }
+    }
+
+    /**
+     * Update piloting tank state
+     */
+    updatePilotingTank(deltaTime) {
+        // Check if tank is still valid
+        if (!this.pilotedTank || !this.pilotedTank.isActive) {
+            this.exitTank();
+            return;
+        }
+
+        // Check if tank was destroyed
+        if (this.pilotedTank.healthBar && this.pilotedTank.healthBar.isDead()) {
+            this.exitTank();
+            return;
+        }
+
+        // Tank handles its own update - we just ride along
+        // Pass deltaTime to tank
+        this.pilotedTank.deltaTime = deltaTime;
+    }
+
+    /**
+     * Exit the tank (called when tank is destroyed or forced exit)
+     */
+    exitTank() {
+        if (this.pilotedTank) {
+            // Tank will handle showing us again
+            this.pilotedTank.exitTank();
+            this.pilotedTank = null;
+        }
+
+        // Make sure we're visible again
+        if (this.mesh) {
+            this.mesh.setEnabled(true);
+        }
+
+        this.state = 'idle';
+    }
+
+    /**
+     * Check if bubby is piloting a tank
+     */
+    isPilotingTank() {
+        return this.pilotedTank !== null && this.pilotedTank.isActive;
+    }
+
     /**
      * Dispose adult bubby and clean up
      */
     dispose() {
+        // Exit tank before disposing
+        if (this.pilotedTank) {
+            this.exitTank();
+        }
+
         // Drop carried fruit before disposing
         if (this.carriedFruit) {
             this.dropCarriedFruit();
@@ -2142,6 +2650,12 @@ export class AdultBubby extends SpawnableObject {
         if (this.armorMesh) {
             this.armorMesh.dispose();
             this.armorMesh = null;
+        }
+
+        // Clean up helmet visual
+        if (this.helmetMesh) {
+            this.helmetMesh.dispose();
+            this.helmetMesh = null;
         }
 
         // updateObserver no longer used

@@ -255,61 +255,108 @@ export class Tree extends SpawnableObject {
     }
 
     /**
+     * Check if a position is within the arena bounds
+     */
+    isWithinArenaBounds(x, z) {
+        const maxX = GameConstants.ARENA.MAX_X;
+        const maxZ = GameConstants.ARENA.MAX_Z;
+        return Math.abs(x) <= maxX && Math.abs(z) <= maxZ;
+    }
+
+    /**
      * Spawn a fruit on the tree - attached to a random foliage sphere
+     * Only spawns in directions where fruit will land on the arena
      */
     spawnFruit() {
         if (!this.onFruitSpawnCallback || !this.foliage || this.foliage.length === 0) {
             return;
         }
 
-        // Pick a random foliage sphere
+        // Try multiple times to find a valid spawn position within arena bounds
+        const maxAttempts = 10;
+
+        for (let attempt = 0; attempt < maxAttempts; attempt++) {
+            // Pick a random foliage sphere
+            const randomFoliage = this.foliage[Math.floor(Math.random() * this.foliage.length)];
+            const foliageWorldPos = randomFoliage.getAbsolutePosition();
+
+            // Get tree center position
+            const treeCenter = this.mesh.position;
+
+            // Calculate base outward direction from tree center through foliage center
+            const baseDirection = foliageWorldPos.subtract(treeCenter);
+            baseDirection.normalize();
+
+            // Add some randomness to the direction (still generally outward)
+            // This creates variation in fruit positions around the foliage sphere
+            const randomAngle1 = (Math.random() - 0.5) * Math.PI * 0.5; // ±45 degrees
+            const randomAngle2 = (Math.random() - 0.5) * Math.PI * 0.5; // ±45 degrees
+
+            // Create a random perpendicular vector for variation
+            const perpVector1 = new BABYLON.Vector3(-baseDirection.z, 0, baseDirection.x);
+            perpVector1.normalize();
+            const perpVector2 = BABYLON.Vector3.Cross(baseDirection, perpVector1);
+            perpVector2.normalize();
+
+            // Combine base direction with random variations
+            let outwardDirection = baseDirection
+                .add(perpVector1.scale(Math.sin(randomAngle1) * 0.5))
+                .add(perpVector2.scale(Math.sin(randomAngle2) * 0.5));
+            outwardDirection.normalize();
+
+            // Get the foliage sphere's radius
+            const foliageRadius = randomFoliage.getBoundingInfo().boundingSphere.radiusWorld || 0.6;
+
+            // Calculate potential fruit position
+            const fruitPosition = new BABYLON.Vector3(
+                foliageWorldPos.x + outwardDirection.x * foliageRadius,
+                foliageWorldPos.y + outwardDirection.y * foliageRadius,
+                foliageWorldPos.z + outwardDirection.z * foliageRadius
+            );
+
+            // Check if fruit landing position (X, Z) is within arena bounds
+            if (this.isWithinArenaBounds(fruitPosition.x, fruitPosition.z)) {
+                // Valid position found - spawn the fruit
+                this.onFruitSpawnCallback(fruitPosition, this.team, this);
+                this.fruitsOnTree++;
+                this.totalFruitsProduced++;
+
+                // Check if tree has reached its lifespan
+                if (this.totalFruitsProduced >= this.maxLifespanFruits) {
+                    this.isDepleted = true;
+                    this.foliageFallPending = true; // Wait for all fruits to fall first
+                }
+                return; // Successfully spawned
+            }
+        }
+
+        // If no valid position found after max attempts, force spawn toward arena center
         const randomFoliage = this.foliage[Math.floor(Math.random() * this.foliage.length)];
         const foliageWorldPos = randomFoliage.getAbsolutePosition();
 
-        // Get tree center position
-        const treeCenter = this.mesh.position;
+        // Direction toward arena center (0, 0)
+        const toCenter = new BABYLON.Vector3(-this.mesh.position.x, 0, -this.mesh.position.z);
+        toCenter.normalize();
 
-        // Calculate base outward direction from tree center through foliage center
-        const baseDirection = foliageWorldPos.subtract(treeCenter);
-        baseDirection.normalize();
-
-        // Add some randomness to the direction (still generally outward)
-        // This creates variation in fruit positions around the foliage sphere
-        const randomAngle1 = (Math.random() - 0.5) * Math.PI * 0.5; // ±45 degrees
-        const randomAngle2 = (Math.random() - 0.5) * Math.PI * 0.5; // ±45 degrees
-
-        // Create a random perpendicular vector for variation
-        const perpVector1 = new BABYLON.Vector3(-baseDirection.z, 0, baseDirection.x);
-        perpVector1.normalize();
-        const perpVector2 = BABYLON.Vector3.Cross(baseDirection, perpVector1);
-        perpVector2.normalize();
-
-        // Combine base direction with random variations
-        const outwardDirection = baseDirection
-            .add(perpVector1.scale(Math.sin(randomAngle1) * 0.5))
-            .add(perpVector2.scale(Math.sin(randomAngle2) * 0.5));
-        outwardDirection.normalize();
-
-        // Get the foliage sphere's radius
         const foliageRadius = randomFoliage.getBoundingInfo().boundingSphere.radiusWorld || 0.6;
 
-        // Position fruit so its center is ON the surface of the foliage sphere
-        // This makes it look attached/touching the foliage
         const fruitPosition = new BABYLON.Vector3(
-            foliageWorldPos.x + outwardDirection.x * foliageRadius,
-            foliageWorldPos.y + outwardDirection.y * foliageRadius,
-            foliageWorldPos.z + outwardDirection.z * foliageRadius
+            foliageWorldPos.x + toCenter.x * foliageRadius,
+            foliageWorldPos.y,
+            foliageWorldPos.z + toCenter.z * foliageRadius
         );
 
-        // Call spawn callback
+        // Clamp to arena bounds as a safety measure
+        fruitPosition.x = Math.max(-GameConstants.ARENA.MAX_X, Math.min(GameConstants.ARENA.MAX_X, fruitPosition.x));
+        fruitPosition.z = Math.max(-GameConstants.ARENA.MAX_Z, Math.min(GameConstants.ARENA.MAX_Z, fruitPosition.z));
+
         this.onFruitSpawnCallback(fruitPosition, this.team, this);
         this.fruitsOnTree++;
         this.totalFruitsProduced++;
 
-        // Check if tree has reached its lifespan
         if (this.totalFruitsProduced >= this.maxLifespanFruits) {
             this.isDepleted = true;
-            this.foliageFallPending = true; // Wait for all fruits to fall first
+            this.foliageFallPending = true;
         }
     }
 

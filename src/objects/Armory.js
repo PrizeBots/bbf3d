@@ -25,6 +25,9 @@ export class Armory extends SpawnableObject {
         // Armor inventory
         this.armorCount = 0;
 
+        // Helmet inventory
+        this.helmetCount = 0;
+
         // Callbacks
         this.getCastle = null; // Function to get team's castle (for resources)
         this.onClickCallback = null; // Callback when armory is clicked (opens menu)
@@ -34,6 +37,7 @@ export class Armory extends SpawnableObject {
         this.chimneyMesh = null;
         this.swordDisplayMeshes = []; // Visual swords around building
         this.armorDisplayMeshes = []; // Visual armor around building
+        this.helmetDisplayMeshes = []; // Visual helmets around building
 
         this.create();
         this.enableShadows();
@@ -110,6 +114,7 @@ export class Armory extends SpawnableObject {
         // Create equipment displays (visual items around building when available)
         this.createSwordDisplay();
         this.createArmorDisplay();
+        this.createHelmetDisplay();
     }
 
     /**
@@ -315,6 +320,100 @@ export class Armory extends SpawnableObject {
             const armor = this.armorDisplayMeshes.pop();
             if (armor) {
                 armor.dispose();
+            }
+        }
+    }
+
+    /**
+     * Create helmet display materials
+     */
+    createHelmetDisplay() {
+        // Create materials once to reuse
+        this.helmetMetalMat = new BABYLON.StandardMaterial(`armoryHelmetMetalMat_${Date.now()}`, this.scene);
+        this.helmetMetalMat.diffuseColor = new BABYLON.Color3(0.55, 0.55, 0.6);
+        this.helmetMetalMat.specularColor = new BABYLON.Color3(0.8, 0.8, 0.85);
+        this.helmetMetalMat.specularPower = 48;
+
+        this.helmetTrimMat = new BABYLON.StandardMaterial(`armoryHelmetTrimMat_${Date.now()}`, this.scene);
+        this.helmetTrimMat.diffuseColor = this.team === 'red'
+            ? new BABYLON.Color3(0.7, 0.2, 0.15)
+            : new BABYLON.Color3(0.15, 0.2, 0.7);
+    }
+
+    /**
+     * Create a single helmet mesh displayed around the building
+     */
+    createStandingHelmet(index) {
+        const helmetRoot = new BABYLON.TransformNode(`armoryHelmetDisplay_${index}_${Date.now()}`, this.scene);
+        helmetRoot.parent = this.mesh;
+
+        // Position helmet in a circle around the armory at random angles
+        const radius = 2.0; // Slightly closer than armor
+        const randomAngle = Math.random() * Math.PI * 2;
+
+        const xPos = Math.cos(randomAngle) * radius;
+        const zPos = Math.sin(randomAngle) * radius;
+
+        helmetRoot.position = new BABYLON.Vector3(xPos, -0.9, zPos); // Near ground, on a stand
+        helmetRoot.rotation.y = randomAngle + Math.PI + (Math.random() - 0.5) * 0.4; // Face outward
+
+        // Helmet dome (main part)
+        const dome = BABYLON.MeshBuilder.CreateSphere(
+            `armoryHelmetDome_${index}_${Date.now()}`,
+            { diameter: 1.0, segments: 12 },
+            this.scene
+        );
+        dome.parent = helmetRoot;
+        dome.position.y = 0.6;
+        dome.scaling = new BABYLON.Vector3(1, 0.8, 1); // Slightly flattened
+        dome.material = this.helmetMetalMat;
+
+        // Helmet brim/visor
+        const brim = BABYLON.MeshBuilder.CreateBox(
+            `armoryHelmetBrim_${index}_${Date.now()}`,
+            { width: 1.1, height: 0.15, depth: 0.6 },
+            this.scene
+        );
+        brim.parent = helmetRoot;
+        brim.position = new BABYLON.Vector3(0, 0.35, 0.35);
+        brim.rotation.x = -0.2;
+        brim.material = this.helmetMetalMat;
+
+        // Team-colored crest on top
+        const crest = BABYLON.MeshBuilder.CreateBox(
+            `armoryHelmetCrest_${index}_${Date.now()}`,
+            { width: 0.1, height: 0.4, depth: 0.8 },
+            this.scene
+        );
+        crest.parent = helmetRoot;
+        crest.position.y = 1.0;
+        crest.material = this.helmetTrimMat;
+
+        // Add to shadow casters
+        if (this.shadowGenerator) {
+            this.shadowGenerator.addShadowCaster(dome);
+            this.shadowGenerator.addShadowCaster(brim);
+            this.shadowGenerator.addShadowCaster(crest);
+        }
+
+        return helmetRoot;
+    }
+
+    /**
+     * Update helmet display - add or remove helmet meshes based on inventory
+     */
+    updateHelmetDisplay() {
+        // Add helmet if we have more than displayed
+        while (this.helmetDisplayMeshes.length < this.helmetCount) {
+            const helmet = this.createStandingHelmet(this.helmetDisplayMeshes.length);
+            this.helmetDisplayMeshes.push(helmet);
+        }
+
+        // Remove helmet if we have fewer than displayed
+        while (this.helmetDisplayMeshes.length > this.helmetCount) {
+            const helmet = this.helmetDisplayMeshes.pop();
+            if (helmet) {
+                helmet.dispose();
             }
         }
     }
@@ -543,6 +642,105 @@ export class Armory extends SpawnableObject {
     }
 
     /**
+     * Craft helmet (consumes resources, adds to inventory)
+     * @returns {boolean} True if helmet was crafted
+     */
+    craftHelmet() {
+        if (!this.getCastle) {
+            console.log('Armory not properly configured');
+            return false;
+        }
+
+        const castle = this.getCastle();
+        if (!castle) {
+            console.log('No castle found');
+            return false;
+        }
+
+        const woodCost = GameConstants.HELMET.WOOD_COST;
+        const stoneCost = GameConstants.HELMET.STONE_COST;
+
+        // Check if we have enough resources
+        if (castle.getWoodCount() < woodCost) {
+            console.log(`Not enough wood for helmet. Need ${woodCost}, have ${castle.getWoodCount()}`);
+            this.flashInsufficient();
+            return false;
+        }
+
+        if (castle.getStoneCount() < stoneCost) {
+            console.log(`Not enough stone for helmet. Need ${stoneCost}, have ${castle.getStoneCount()}`);
+            this.flashInsufficient();
+            return false;
+        }
+
+        // Consume resources
+        castle.useWood(woodCost);
+        castle.useStone(stoneCost);
+
+        // Add helmet to inventory
+        this.helmetCount++;
+        this.updateHelmetDisplay();
+
+        // Visual feedback
+        this.flashSuccess();
+
+        console.log(`Helmet crafted! Inventory: ${this.helmetCount} helmets`);
+        return true;
+    }
+
+    /**
+     * Check if armory can craft a helmet
+     */
+    canCraftHelmet() {
+        if (!this.getCastle) return false;
+
+        const castle = this.getCastle();
+        if (!castle) return false;
+
+        const woodCost = GameConstants.HELMET.WOOD_COST;
+        const stoneCost = GameConstants.HELMET.STONE_COST;
+
+        return castle.getWoodCount() >= woodCost && castle.getStoneCount() >= stoneCost;
+    }
+
+    /**
+     * Check if armory has a helmet available
+     */
+    hasHelmet() {
+        return this.helmetCount > 0;
+    }
+
+    /**
+     * Take helmet from inventory (for equipping a bubby)
+     * @returns {boolean} True if helmet was taken
+     */
+    takeHelmet() {
+        if (this.helmetCount > 0) {
+            this.helmetCount--;
+            this.updateHelmetDisplay();
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Get helmet count
+     */
+    getHelmetCount() {
+        return this.helmetCount;
+    }
+
+    /**
+     * Get helmet cost
+     */
+    getHelmetCost() {
+        return {
+            wood: GameConstants.HELMET.WOOD_COST,
+            stone: GameConstants.HELMET.STONE_COST
+        };
+    }
+
+    /**
      * Get position (for drop detection)
      */
     getPosition() {
@@ -674,6 +872,16 @@ export class Armory extends SpawnableObject {
         // Dispose armor materials
         if (this.armorMetalMat) this.armorMetalMat.dispose();
         if (this.armorTrimMat) this.armorTrimMat.dispose();
+        // Dispose all helmet display meshes
+        if (this.helmetDisplayMeshes) {
+            for (const helmet of this.helmetDisplayMeshes) {
+                if (helmet) helmet.dispose();
+            }
+            this.helmetDisplayMeshes = [];
+        }
+        // Dispose helmet materials
+        if (this.helmetMetalMat) this.helmetMetalMat.dispose();
+        if (this.helmetTrimMat) this.helmetTrimMat.dispose();
 
         super.dispose();
     }

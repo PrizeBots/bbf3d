@@ -26,6 +26,7 @@ export class Bubby extends SpawnableObject {
         this.getAllPlants = config.getAllPlants; // Function to get all plants in the scene
         this.getAllBubbies = config.getAllBubbies; // Function to get all other bubbies
         this.getAllFruits = config.getAllFruits || null; // Function to get all fruits in the scene
+        this.getAllBuildings = config.getAllBuildings || null; // Function to get all buildings for avoidance
         this.onMatureCallback = config.onMatureCallback; // Callback when baby matures to adult
         this.attackEffects = config.attackEffects || null; // Attack visual effects
         this.soundManager = config.soundManager || null; // Sound manager
@@ -246,7 +247,7 @@ export class Bubby extends SpawnableObject {
 
         // Move toward wander target
         if (this.wanderTarget) {
-            const distance = this.ai.moveToward(this.wanderTarget, this.getAllBubbies, 0.4);
+            const distance = this.ai.moveToward(this.wanderTarget, this.getAllBubbies, 0.4, this.getAllBuildings);
 
             // Check if reached wander target
             if (distance < 2) {
@@ -280,7 +281,7 @@ export class Bubby extends SpawnableObject {
         }
 
         // Move toward target with collision avoidance
-        this.ai.moveToward(this.target.mesh.position, this.getAllBubbies, 0.5);
+        this.ai.moveToward(this.target.mesh.position, this.getAllBubbies, 0.5, this.getAllBuildings);
     }
 
     /**
@@ -291,6 +292,12 @@ export class Bubby extends SpawnableObject {
             this.target = null;
             this.state = 'idle';
             return;
+        }
+
+        // Face the target while attacking
+        const targetPos = this.ai.getTargetPosition(this.target);
+        if (targetPos) {
+            this.ai.faceTarget(targetPos);
         }
 
         // If target moved out of attack range, chase it
@@ -482,6 +489,75 @@ export class Bubby extends SpawnableObject {
      */
     getTeam() {
         return this.team;
+    }
+
+    // ==========================================
+    // STAT GETTERS - Base stats for baby bubby
+    // ==========================================
+
+    /**
+     * Get max health
+     */
+    getMaxHealth() {
+        return this.maxHealth;
+    }
+
+    /**
+     * Get attack damage
+     */
+    getAttackDamage() {
+        return GameConstants.BABY_BUBBY.ATTACK_DAMAGE;
+    }
+
+    /**
+     * Get attack interval (seconds between attacks)
+     */
+    getAttackInterval() {
+        return GameConstants.BABY_BUBBY.ATTACK_INTERVAL;
+    }
+
+    /**
+     * Get attack range
+     */
+    getAttackRange() {
+        return GameConstants.BABY_BUBBY.ATTACK_RANGE;
+    }
+
+    /**
+     * Get move speed
+     */
+    getMoveSpeed() {
+        return GameConstants.BABY_BUBBY.MOVE_SPEED;
+    }
+
+    /**
+     * Get sensing range
+     */
+    getSensingRange() {
+        return GameConstants.BABY_BUBBY.SENSING_RANGE;
+    }
+
+    /**
+     * Get defense (damage reduction as a decimal, 0 = no reduction, 0.3 = 30% reduction)
+     */
+    getDefense() {
+        return GameConstants.BABY_BUBBY.BASE_DEFENSE;
+    }
+
+    /**
+     * Override takeDamage to apply defense
+     */
+    takeDamage(amount) {
+        let finalDamage = amount;
+
+        // Apply defense damage reduction
+        const defense = this.getDefense();
+        if (defense > 0) {
+            finalDamage = amount * (1 - defense);
+        }
+
+        // Call parent takeDamage with reduced amount
+        super.takeDamage(finalDamage);
     }
 
     /**

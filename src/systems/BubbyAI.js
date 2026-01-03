@@ -54,6 +54,82 @@ export class BubbyAI {
     }
 
     /**
+     * Calculate avoidance vector for buildings (armories, turrets, factories, castles)
+     * Friendly buildings are avoided, enemy buildings can be walked through (to attack)
+     * @param {Function} getAllBuildings - Function that returns all buildings
+     * @returns {BABYLON.Vector3|null} - Normalized avoidance vector or null if no collision
+     */
+    calculateBuildingAvoidance(getAllBuildings) {
+        if (!getAllBuildings) {
+            return null;
+        }
+
+        const buildings = getAllBuildings();
+        const ownerPos = this.owner.mesh.position;
+        const ownerTeam = this.owner.team;
+        let avoidanceVector = new BABYLON.Vector3(0, 0, 0);
+        let hasCollision = false;
+
+        for (const building of buildings) {
+            if (!building.isActive) continue;
+
+            // Get building position
+            let buildingPos;
+            if (building.getPosition) {
+                buildingPos = building.getPosition();
+            } else if (building.mesh && building.mesh.position) {
+                buildingPos = building.mesh.position;
+            } else {
+                continue;
+            }
+
+            // Determine building radius based on type
+            let buildingRadius = 3.0; // Default radius
+            if (building.constructor && building.constructor.name) {
+                const name = building.constructor.name;
+                if (name === 'Castle') {
+                    buildingRadius = 6.0; // Castles are large
+                } else if (name === 'Armory') {
+                    buildingRadius = 2.5;
+                } else if (name === 'Turret') {
+                    buildingRadius = 2.0;
+                } else if (name === 'Factory') {
+                    buildingRadius = 4.0;
+                }
+            }
+
+            // Check if building is in our path
+            const toBuilding = buildingPos.subtract(ownerPos);
+            toBuilding.y = 0; // Only consider horizontal distance
+            const distance = toBuilding.length();
+
+            // Avoidance radius = building radius + bubby radius + buffer
+            const avoidanceRadius = buildingRadius + 1.5;
+
+            if (distance < avoidanceRadius && distance > 0.1) {
+                // Check if this is an enemy building - soldiers can pass through to attack
+                const isEnemy = building.team && building.team !== ownerTeam;
+                const isSoldier = this.owner.isSoldier;
+
+                // If soldier approaching enemy building to attack, don't avoid
+                if (isEnemy && isSoldier && this.owner.combatTarget === building) {
+                    continue;
+                }
+
+                // For friendly buildings or non-combat situations, avoid
+                if (!isEnemy || !isSoldier) {
+                    const repulsion = toBuilding.normalize().scale(-1);
+                    const strength = 1 - (distance / avoidanceRadius);
+                    avoidanceVector.addInPlace(repulsion.scale(strength * 2)); // Stronger repulsion for buildings
+                    hasCollision = true;
+                }
+            }
+        }
+
+        return hasCollision ? avoidanceVector.normalize() : null;
+    }
+
+    /**
      * Constrain position to arena bounds
      * @param {Object} wanderState - Object with wanderTarget property to reset on boundary hit
      * @returns {boolean} - True if position was constrained (hit boundary)
@@ -121,9 +197,10 @@ export class BubbyAI {
      * @param {BABYLON.Vector3} targetPos - Position to move toward
      * @param {Function} getAllBubbies - Function to get all bubbies for avoidance
      * @param {number} avoidanceBlend - How much to blend avoidance (0-1)
+     * @param {Function} getAllBuildings - Function to get all buildings for avoidance
      * @returns {number} - Distance to target after movement
      */
-    moveToward(targetPos, getAllBubbies = null, avoidanceBlend = 0.5) {
+    moveToward(targetPos, getAllBubbies = null, avoidanceBlend = 0.5, getAllBuildings = null) {
         const mesh = this.owner.mesh;
         const direction = targetPos.subtract(mesh.position);
         const distance = direction.length();
@@ -134,7 +211,7 @@ export class BubbyAI {
 
         direction.normalize();
 
-        // Apply collision avoidance if available
+        // Apply bubby collision avoidance if available
         if (getAllBubbies) {
             const avoidanceVector = this.calculateAvoidance(getAllBubbies);
             if (avoidanceVector) {
@@ -145,8 +222,35 @@ export class BubbyAI {
             }
         }
 
+        // Apply building avoidance if available
+        if (getAllBuildings) {
+            const buildingAvoidance = this.calculateBuildingAvoidance(getAllBuildings);
+            if (buildingAvoidance) {
+                // Buildings have stronger avoidance priority
+                const buildingBlend = 0.7;
+                const moveBlend = 1 - buildingBlend;
+                direction.x = direction.x * moveBlend + buildingAvoidance.x * buildingBlend;
+                direction.z = direction.z * moveBlend + buildingAvoidance.z * buildingBlend;
+                direction.normalize();
+            }
+        }
+
+        // Move position
         mesh.position.x += direction.x * this.config.MOVE_SPEED;
         mesh.position.z += direction.z * this.config.MOVE_SPEED;
+
+        // Rotate to face movement direction (smooth rotation)
+        const targetAngle = Math.atan2(direction.x, direction.z);
+        const currentAngle = mesh.rotation.y;
+
+        // Calculate shortest rotation direction
+        let angleDiff = targetAngle - currentAngle;
+        while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+        while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+
+        // Smooth rotation (lerp toward target angle)
+        const rotationSpeed = 0.15;
+        mesh.rotation.y += angleDiff * rotationSpeed;
 
         return distance;
     }
@@ -256,5 +360,44 @@ export class BubbyAI {
         if (target.mesh && target.mesh.position) return target.mesh.position;
         if (target.position) return target.position;
         return null;
+    }
+
+    /**
+     * Rotate to face a target position (without moving)
+     * @param {BABYLON.Vector3} targetPos - Position to face
+     * @param {number} rotationSpeed - How fast to rotate (0-1, default 0.15)
+     */
+    faceTarget(targetPos, rotationSpeed = 0.15) {
+        const mesh = this.owner.mesh;
+        if (!mesh) return;
+
+        const direction = targetPos.subtract(mesh.position);
+        if (direction.length() < 0.1) return;
+
+        direction.normalize();
+
+        // Calculate target angle
+        const targetAngle = Math.atan2(direction.x, direction.z);
+        const currentAngle = mesh.rotation.y;
+
+        // Calculate shortest rotation direction
+        let angleDiff = targetAngle - currentAngle;
+        while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+        while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+
+        // Smooth rotation
+        mesh.rotation.y += angleDiff * rotationSpeed;
+    }
+
+    /**
+     * Instantly face a direction (for immediate facing needs)
+     * @param {BABYLON.Vector3} direction - Direction to face (will be normalized)
+     */
+    faceDirection(direction) {
+        const mesh = this.owner.mesh;
+        if (!mesh || direction.length() < 0.01) return;
+
+        direction.normalize();
+        mesh.rotation.y = Math.atan2(direction.x, direction.z);
     }
 }

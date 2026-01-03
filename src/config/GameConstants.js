@@ -57,6 +57,7 @@ export const GameConstants = {
         // Combat
         ATTACK_INTERVAL: 1.0,             // Seconds between attacks
         ATTACK_DAMAGE: 1,                 // Damage per attack
+        BASE_DEFENSE: 0,                  // Base damage reduction (0 = no reduction)
         // Note: Effective attack rate = 1 HP/second
 
         // Growth
@@ -84,6 +85,7 @@ export const GameConstants = {
         // Combat
         ATTACK_INTERVAL: 0.8,             // Seconds between attacks (faster than baby)
         ATTACK_DAMAGE: 2,                 // Damage per attack (more than baby)
+        BASE_DEFENSE: 0,                  // Base damage reduction (0 = no reduction)
         // Note: Effective attack rate = 2.5 HP/second
 
         // Growth
@@ -121,6 +123,7 @@ export const GameConstants = {
         // Combat
         ATTACK_INTERVAL: 0.6,             // Seconds between attacks (faster than adult)
         ATTACK_DAMAGE: 4,                 // Damage per attack (more than adult)
+        BASE_DEFENSE: 0.1,                // 10% base damage reduction (trained for combat)
 
         // Movement
         MOVE_SPEED: 0.08,                 // Movement speed (faster than adult)
@@ -162,6 +165,19 @@ export const GameConstants = {
 
         // Defense bonus when equipped
         DAMAGE_REDUCTION: 0.3,            // 30% damage reduction
+    },
+
+    // ==========================================
+    // HELMET (Equippable Head Protection)
+    // ==========================================
+
+    HELMET: {
+        // Creation cost (at Armory)
+        WOOD_COST: 0,                     // No wood required
+        STONE_COST: 2,                    // Stone required to craft
+
+        // Defense bonus when equipped
+        DAMAGE_REDUCTION: 0.15,           // 15% damage reduction (stacks with armor)
     },
 
     // ==========================================
@@ -241,5 +257,54 @@ export const GameConstants = {
         // Building cost
         WOOD_COST: 5,
         STONE_COST: 10,
+    },
+
+    // ==========================================
+    // FACTORY (Vehicle Production Building)
+    // ==========================================
+
+    FACTORY: {
+        // Health
+        MAX_HP: 300,                      // Factory health (sturdy building)
+
+        // Building cost
+        WOOD_COST: 10,
+        STONE_COST: 15,
+
+        // Production
+        DOOR_OPEN_TIME: 1.5,              // Seconds for door to open
+        DOOR_CLOSE_TIME: 1.0,             // Seconds for door to close
+        PRODUCTION_TIME: 3.0,             // Seconds to produce a tank
+    },
+
+    // ==========================================
+    // TANK (Piloted Vehicle)
+    // ==========================================
+
+    TANK: {
+        // Health (very tanky!)
+        MAX_HP: 200,                      // High HP
+
+        // Movement (slower than bubby)
+        MOVE_SPEED: 0.035,                // Much slower than bubby (0.075)
+        SENSING_RANGE: 30,                // Good detection range
+        ATTACK_RANGE: 18,                 // Medium-long range
+
+        // Combat (powerful but slow)
+        ATTACK_DAMAGE: 15,                // Base damage per shot
+        SPLASH_DAMAGE: 10,                // Splash damage to nearby enemies
+        SPLASH_RADIUS: 4,                 // Radius of explosion
+        ATTACK_INTERVAL: 2.5,             // Slow attack rate
+
+        // Defense
+        DAMAGE_REDUCTION: 0.5,            // 50% damage reduction
+
+        // Projectile
+        PROJECTILE_SPEED: 0.5,            // Slower, heavier projectile
+        PROJECTILE_SIZE: 0.6,             // Big cannonball
+
+        // Production cost
+        WOOD_COST: 8,
+        STONE_COST: 12,
     },
 };

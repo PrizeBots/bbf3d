@@ -55,9 +55,11 @@ export class AIPlayer {
 
         // Attack wave tracking
         this.lastAttackWaveTime = 0;
-        this.attackWaveInterval = 30; // Seconds between attack waves
+        this.attackWaveInterval = 15; // Seconds between attack waves
         this.soldiersInWave = 0;
         this.targetSoldiersPerWave = 3; // How many soldiers to send per wave
+        this.assaultTimer = 0;
+        this.assaultCheckInterval = 2.0; // Check for idle soldiers every 2 seconds
 
         // AI personality/difficulty
         this.aggression = 0.6; // Higher = more aggressive
@@ -88,6 +90,11 @@ export class AIPlayer {
         // Update game phase
         this.updateGamePhase(deltaTime);
 
+        // In late game and assault phases, actively direct soldiers to attack enemy castle
+        if (this.gamePhase === 'late' || this.gamePhase === 'assault') {
+            this.updateAssault(deltaTime);
+        }
+
         switch (this.state) {
             case 'idle':
                 this.updateIdle(deltaTime);
@@ -104,6 +111,59 @@ export class AIPlayer {
             case 'waiting':
                 this.updateWaiting(deltaTime);
                 break;
+        }
+    }
+
+    /**
+     * Update assault logic - assign soldiers to attack enemy castle
+     */
+    updateAssault(deltaTime) {
+        this.assaultTimer += deltaTime;
+
+        // Check more frequently in assault phase
+        const checkInterval = this.gamePhase === 'assault' ? 1.0 : this.assaultCheckInterval;
+
+        if (this.assaultTimer >= checkInterval) {
+            this.assaultTimer = 0;
+            this.assignSoldiersToAttackCastle();
+        }
+    }
+
+    /**
+     * Assign idle soldiers to attack the enemy castle
+     */
+    assignSoldiersToAttackCastle() {
+        if (!this.getAllBubbies || !this.getEnemyCastle) return;
+
+        const enemyCastle = this.getEnemyCastle();
+        if (!enemyCastle || !enemyCastle.isActive) return;
+
+        const bubbies = this.getAllBubbies();
+        const mySoldiers = bubbies.filter(b =>
+            b.team === this.team &&
+            b.isActive &&
+            b.isSoldier
+        );
+
+        // Assign idle or wandering soldiers to attack the castle
+        for (const soldier of mySoldiers) {
+            // Check if soldier is idle, wandering, or not already attacking the castle
+            const isIdle = soldier.state === 'idle' || soldier.state === 'wandering';
+            const isNotAttackingCastle = !soldier.combatTarget || soldier.combatTarget !== enemyCastle;
+
+            // More aggressive in assault phase - reassign even soldiers doing other tasks
+            const shouldReassign = this.gamePhase === 'assault'
+                ? (isIdle || (isNotAttackingCastle && !soldier.combatTarget))
+                : isIdle;
+
+            if (shouldReassign) {
+                // Assign soldier to attack the enemy castle
+                soldier.combatTarget = enemyCastle;
+                soldier.state = 'stalking_enemy';
+                soldier.target = null; // Clear any other target
+
+                console.log(`AI assigned soldier to attack enemy castle!`);
+            }
         }
     }
 
@@ -131,10 +191,10 @@ export class AIPlayer {
                 console.log('AI entering late game phase');
             }
         } else if (this.gamePhase === 'late') {
-            // Move to assault when we have enough soldiers
-            if (mySoldiers >= 4 || this.phaseTimer > 90) {
+            // Move to assault when we have enough soldiers (or after timeout)
+            if (mySoldiers >= 3 || this.phaseTimer > 75) {
                 this.gamePhase = 'assault';
-                console.log('AI entering assault phase!');
+                console.log('AI entering assault phase - attacking enemy castle!');
             }
         }
     }
